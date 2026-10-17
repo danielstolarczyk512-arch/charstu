@@ -187,6 +187,18 @@ Konfiguracja: `PARTNER_MODEL`, `DUET_MAX_REFS`, `INTERACTION_DEFAULT` w `.env`. 
   ale jak model zareaguje na takie opisy i obrazy układu, trzeba sprawdzić samemu.
 - Klip start→koniec dla pary może mieć "duchy" w środku (zmierzone raz); klipy dłuższe niż 8 s i partner w filmie z klipami 15 s nie były sprawdzane.
 
+### Naga sylwetka w kanonie i przełącznik "Twarz partnera w kadrze"
+Rola kanonu `body_nude` to obraz całej sylwetki bez ubrania (wyłącznie wygenerowany lub rysunek). Dodajesz ją w Studiu (lista ról kanonu) albo w oknie Duet
+("Naga sylwetka A/B w kanonie"). Przełącznik w oknie Duet (domyślnie zaznaczony, zapamiętywany w przeglądarce) wybiera, co zajmuje drugi slot referencji:
+**zaznaczony** = `[twarz A, twarz B]` jak dotąd; **odznaczony** (`ref_slot_b = lead_body`) = `[twarz A, naga sylwetka A]`, a partner jest opisany tylko słowami w prompcie.
+Bez zatwierdzonej `body_nude` A program ostrzega i wraca do twarzy partnera. Istniejące ujęcia mają `partner_face`, czyli zachowują się jak przed zmianą.
+Kolumna `anatomy` pozycji biblioteki to stała fraza doklejana po opisie interakcji; edytujesz ją w oknie Duet ("Anatomia pozycji") albo przez
+`PATCH /api/duet/interactions/{pozycja}`. Fabrycznie wypełnione są tylko pozycje bez scen jednoznacznie seksualnych, resztę wpisujesz sam.
+Klip i obraz pary dostają blok `frame_guard` ("exactly two people in the frame and nobody else. Two pairs of legs..."); klip pary nie wymusza stroju, gdy któryś
+ze strojów opisuje brak ubrania. Skrypt `python -m tests.interaction_sheet` generuje obraz pozycji (model z planu) i podłącza go do biblioteki.
+**Niepewne:** `ref_slot_b = lead_body`, wpływ `frame_guard` i `anatomy` na trzecią osobę oraz to, czy nagi obraz pozycji przenosi nagość na wynik, **nie były sprawdzone
+prawdziwym renderem** (tylko testy bez modelu); etap E5 (sceny jednoznacznie seksualne) nie został wykonany przeze mnie, patrz `DUET_RAPORT.md`.
+
 ## Modele: lista wyboru i pokrycie planem
 Wszystkie pola modelu w interfejsie to listy rozwijane zasilane z `/api/models` (rejestr `app/models.py` scalony z katalogiem Sogni, cache w `data/model_catalog.json`, przycisk
 "Odśwież katalog"). Każda pozycja ma znacznik **w planie** (Unlimited, fair use, bez Premium Spark) albo **Premium Spark** (poza planem), a także "niesprawdzony" i

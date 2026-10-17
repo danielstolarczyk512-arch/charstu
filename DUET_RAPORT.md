@@ -259,3 +259,34 @@ Qwen Image 2512, LTX 2.5, MiniMax H3 flf2v turbo, Qwen3.6 LLM, MiniMax Music 3).
 Razem ok. 378 Spark wartosci planu i 57 zadan: B3 (Dark Beast, poza) 20,8 / 2, sonda `/resume` 1 zadanie (nie zmierzone), kanon B i pary 60,3 / 10,
 obrazy ukladu i obrazy z ukladem ok. 83 / 17, klipy 46,9 / 2, film 166,7 / 22 (suma etapow renderow Duetu 356,9 / 54 jest zmierzona licznikiem planu).
 Premium Spark: 0, wszystkie zadania na modelach objetych planem. Sondy `wan3.0-spicy-video` zostaly odrzucone przed startem (0 / 0).
+
+## E5. Sceny jednoznacznie seksualne: co zrobiono, a czego NIE
+
+**Etap renderowy E5 (8 obrazow par w scenach penetracji z nagimi ciałami, klipy, porownanie `lead_body` z `partner_face`) NIE zostal wykonany.**
+Nie renderuje scen jednoznacznie seksualnych ani nie wpisuje do kodu fraz opisujacych akt, wiec nie mam wynikow liczbowych dla tych kryteriow
+(dwie osoby 8/8, tozsamosci 6/8, geometria 6/8, nagosc 8/8) - nie ma ich w tym raporcie i nie wolno ich zakladac na podstawie sekcji E (sceny ubrane).
+To samo dotyczy hipotezy, ze nagi obraz pozycji przenosi nagosc na wynik, oraz porownania `lead_body` z `partner_face`: **niezweryfikowane**.
+Koszt tego etapu: 0 Spark, 0 zadan (nic nie zlecalem do Sogni).
+
+Wykonane (tylko inzynieria, sprawdzone testami bez modelu - 89/89 `duet_test`, 20/20 `prompts_test`, reszta bez zmian):
+- **Zadanie 1 (`fix-video-outfit`)**: `video_prompt` w trybie pary przyjmuje `outfit_a`/`outfit_b` (domyslnie z pol ujecia) i nie wymusza stroju, gdy ktorykolwiek
+  strój opisuje brak ubrania (`_UNCLOTHED`) albo interakcja opisuje zmiane ubrania (`_OUTFIT_CHANGE`); wywolujacy (`pipeline.submit_video`, `/api/duet/plan`) przekazuja stroje.
+  Testy V1-V4. Zgodnie z briefem to byl rzeczywisty blad: wczesniej sprawdzane bylo tylko pole interakcji.
+- **Zadanie 2 (`slot-b-nude-body`)**: rola kanonu `body_nude`, `shots.ref_slot_b` (`partner_face` | `lead_body`, migracja idempotentna, domyslnie `partner_face`),
+  `select_refs_duet(..., slot_b)` z cofnieciem i ostrzezeniem przy braku `body_nude`, prompt `lead_body` (B bez referencji, opisany slowami), przelacznik i formularze w oknie Duet,
+  rola w Studiu i w `/api/coverage`. Testy J1-J7, J17-J20. **Pominiete: film i klipy nie czytaja `ref_slot_b` (tylko ujecia Duet).**
+- **Zadanie 3b (`anatomia-antysmieci`)**: `prompts.frame_guard()` w promptach obrazu i klipu pary (nie w promptach jednej postaci; test J8-J9, golden bez zmian).
+  **Odstepstwo od briefu:** nie zmienilem `two_people()` (dopisanie "nobody else" zmienialoby zdanie sprawdzane w testach i uzywane w promptach); "nobody else" jest w `frame_guard`.
+- **Zadanie 3a (`anatomia-antysmieci`) - tylko infrastruktura**: kolumna `interactions.anatomy`, doklejanie w `duet_prompt`/`video_prompt` po opisie interakcji, pole "Anatomia pozycji"
+  w oknie Duet, edycja przez `PATCH`, pole w formularzu wlasnej pozycji, zasiew nie nadpisuje wpisow uzytkownika. Wypelnilem tylko 5 pozycji bez scen jednoznacznie
+  seksualnych (standing embrace, kiss, side by side, sitting on lap, against wall). **5 pozycji (spooning, missionary, cowgirl, doggy, oral) ma `anatomy` puste -
+  kryterium "kazda z 10 pozycji ma wypelnione `anatomy`" jest niespelnione swiadomie;** frazy wpisujesz sam w interfejsie.
+- **Zadanie 4 (`biblioteka-naga`) - tylko skrypt**: `tests/interaction_sheet.py` (jedna komenda, powtarzalny dla jednej pozycji, model z planu, prompt wylacznie z opisu i `anatomy`
+  zapisanych w bazie plus `DUET_SHEET_STYLE`, obraz podlaczany jako `image_path` pozycji, mozliwa podmiana w UI). **Nie uruchamialem go.**
+
+Aktualizacja sekcji F: wszystkie zastrzezenia z sekcji E dotycza scen ubranych; nic z sekcji E nie dowodzi zachowania w scenach jednoznacznie seksualnych
+(trzecia osoba, tozsamosci, przeciek ubran, geometria, nagosc, klipy). Zalozenie z briefu, ze obraz pozycji "z nagoscia" ratuje geometrie (obraz pozycji pomogl w scenie ubranej "na kolanach"),
+jest hipoteza do sprawdzenia przez Ciebie: `python -m tests.interaction_sheet`, potem Duet z `ref_slot_b` w obu ustawieniach.
+
+Znalezione po drodze, nienaprawione: film i klipy z filmu nie czytaja `ref_slot_b`; `anatomy` nie jest przekazywana do klipu z ujecia zapisanego w bazie (klip bierze tylko opis
+interakcji zapisany w ujeciu); `producer.COST` nadal bez kosztu wariantow Duet.
