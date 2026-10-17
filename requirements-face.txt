@@ -1,0 +1,6 @@
+# Opcjonalny pomiar twarzy (InsightFace). Wagi modeli na licencji niekomercyjnej - tylko uzytek osobisty.
+# Model buffalo_l (ok. 280 MB) pobiera sie sam przy pierwszym uzyciu.
+onnxruntime
+opencv-python-headless
+numpy
+insightface

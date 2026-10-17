@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Character Studio</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <strong>Character Studio</strong>
+  <nav class="nav"><button id="navStudio" class="pill on">Studio</button><button id="navFilm" class="pill">Film</button></nav>
+  <span id="status" class="muted"></span>
+</header>
+<div id="filmView" hidden>
+  <aside class="col fm-side">
+    <h2>Filmy</h2>
+    <div id="fmList"></div>
+    <details id="fmNewBox"><summary>Nowy film</summary>
+      <form id="fmNew">
+        <input name="title" placeholder="Tytuł filmu" required>
+        <select name="character_id" id="fmChar"></select>
+        <select name="fmt"><option value="16:9">16:9 (poziomo)</option><option value="9:16">9:16 (pionowo)</option></select>
+        <button type="submit">Utwórz film</button>
+      </form>
+    </details>
+  </aside>
+  <section class="col fm-main" id="fmMain"><div class="muted">Wybierz film z listy albo utwórz nowy.</div></section>
+</div>
+<main id="studioView">
+  <section class="col" id="left">
+    <h2>Asystent</h2>
+    <textarea id="aiMsg" rows="3" placeholder="Napisz po polsku, co chcesz (np. postać, serię ujęć, okrążenie)…"></textarea>
+    <div class="actions" style="margin:6px 0"><button id="aiGo">Zapytaj</button><span id="aiState" class="muted"></span></div>
+    <div id="aiOut" style="margin-bottom:10px"></div>
+    <h2>Postacie</h2>
+    <div id="chars"></div>
+    <details id="charEdit" hidden><summary>Edytuj postać i szafę</summary>
+      <form id="charEditForm">
+        <input name="name" placeholder="Imię" required>
+        <input name="archetype" placeholder="Archetyp">
+        <input name="traits" placeholder="Cechy (włosy, oczy, budowa, znaki szczególne)">
+        <div class="attrs" data-for="edit"></div>
+        <input name="outfit" placeholder="Domyślny strój">
+        <input name="style" placeholder="Styl">
+        <div class="actions" style="margin:0"><button type="submit">Zapisz</button><button type="button" id="charDel" class="alt">Usuń postać</button></div>
+      </form>
+      <h2 style="margin-top:10px">Szafa</h2>
+      <div id="wardrobe"></div>
+      <form id="wardForm" style="margin-top:6px">
+        <input name="name" placeholder="Nazwa stroju (np. Podróżny)" required>
+        <input name="description" placeholder="Opis stroju po angielsku" required>
+        <button type="submit" class="alt">Dodaj do szafy</button>
+      </form>
+    </details>
+    <details>
+      <summary>Nowa postać</summary>
+      <form id="charForm">
+        <input name="name" placeholder="Imię" required>
+        <input name="archetype" placeholder="Archetyp (np. łowczyni)">
+        <input name="traits" placeholder="Cechy (włosy, oczy, budowa)">
+        <div class="attrs" data-for="new"></div>
+        <input name="outfit" placeholder="Strój">
+        <input name="style" placeholder="Styl (np. semi-realistic, cinematic)">
+        <label class="check"><input type="checkbox" name="adult_fictional"> Postać jest fikcyjna i dorosła (18+), nie jest realną osobą</label>
+        <button type="submit">Utwórz</button>
+      </form>
+    </details>
+    <div id="canonBox" hidden>
+      <h2>Kanon</h2>
+      <div id="coverage"></div>
+      <form id="canonForm">
+        <select name="role">
+          <option value="face">face (twarz)</option><option value="body">body (sylwetka)</option>
+          <option value="front">front</option><option value="three_quarter">3/4</option>
+          <option value="profile">profil</option><option value="back">tył</option>
+        </select>
+        <select name="tier"><option value="main">główny</option><option value="directional">kierunkowy</option></select>
+        <input type="file" name="file" accept="image/*" required>
+        <button type="submit">Dodaj do kanonu</button>
+      </form>
+      <div class="actions" style="margin:8px 0 0"><button id="sheetBtn" class="alt" title="Generuje z kanonu 4 widoki (przód, 3/4, profil, tył) i 4 miny (8 obrazów). Najlepsze zatwierdzasz do kanonu.">Arkusz postaci (8 ujęć)</button></div>
+      <div id="canon" class="thumbs"></div>
+      <h3 style="margin:12px 0 4px">Poza z referencji</h3>
+      <div class="muted" style="font-size:12px">Poza kopiowana z obrazu (model Qwen; kanon daje twarz). Wgraj obraz pozy — wyłącznie wygenerowany lub rysunek; nie zdjęcia prawdziwych osób. Zdjęcia pozy potrafią przenieść też ubranie, szkielety działają niepewnie (patrz README).</div>
+      <form id="poseForm">
+        <input type="text" name="name" placeholder="nazwa pozy">
+        <input type="file" name="file" accept="image/*">
+        <select name="preset"><option value="">— lub szkielet —</option></select>
+        <button type="submit">Dodaj pozę</button>
+      </form>
+      <select id="poseSel" title="Poza użyta przy następnym generowaniu obrazu"><option value="">Bez pozy z referencji</option></select>
+    </div>
+  </section>
+
+  <section class="col" id="mid">
+    <h2>Kamera</h2>
+    <div id="wrap">
+      <canvas id="cv"></canvas>
+      <div id="frame"></div>
+      <div id="tag">Podgląd kamery</div>
+      <div id="hint">Przeciągnij tło: obrót widoku. Przeciągnij ramkę: obrót kamery.</div>
+    </div>
+    <div class="pills">
+      <button class="pill" data-az="0">Przód</button><button class="pill" data-az="40">3/4</button>
+      <button class="pill" data-az="90">Profil</button><button class="pill" data-az="180">Tył</button>
+      <span class="sp"></span>
+      <button class="pill on" data-fmt="16:9">16:9</button><button class="pill" data-fmt="9:16">9:16</button>
+    </div>
+    <div class="row"><span>Kąt</span><input type="range" id="az" min="-180" max="180" value="40"><span id="azv"></span></div>
+    <div class="row"><span>Wysokość</span><input type="range" id="el" min="-60" max="85" value="5"><span id="elv"></span></div>
+    <div class="row"><span>Odległość</span><input type="range" id="di" min="12" max="80" value="40"><span id="div"></span></div>
+    <div class="row"><span>Obiektyw</span><input type="range" id="fv" min="20" max="80" value="35"><span id="fvv"></span></div>
+    <textarea id="action" rows="2" placeholder="Co robi postać? (np. stoi na dachu, patrzy w dal)"></textarea>
+    <input id="outfit" placeholder="Strój w tym ujęciu (puste = ten sam co w kanonie)" style="width:100%;margin-bottom:8px">
+    <div class="box" style="margin-bottom:8px">
+      <div class="row" style="grid-template-columns:150px minmax(0,1fr)"><span>Model obrazu (bez kanonu)</span><input id="mGen" list="dlGen" placeholder="id modelu"></div>
+      <div class="row" style="grid-template-columns:150px minmax(0,1fr)"><span>Model edycji (z kanonem)</span><input id="mEdit" list="dlEdit" placeholder="id modelu"></div>
+      <label class="check" style="margin:4px 0"><input type="checkbox" id="useRefs" checked> Użyj kanonu jako referencji (odznacz = sam opis, tożsamość z opisu)</label>
+      <datalist id="dlGen"></datalist><datalist id="dlEdit"></datalist>
+      <div id="mNote" class="muted"></div>
+    </div>
+    <div class="box"><div id="camPl" class="muted"></div><pre id="prompt"></pre></div>
+    <div class="actions">
+      <button id="genImg">Generuj obraz</button>
+      <select id="count"><option>1</option><option>2</option><option>4</option></select>
+      <button id="genVid" class="alt">Generuj klip</button>
+      <button id="genFlf" class="alt" title="Klip między dwoma obrazami (MiniMax H3), np. okrążenie z przodu na tył">Klip start→koniec</button>
+      <button id="est" class="alt">Wyceń</button>
+    </div>
+    <div id="msg" class="muted"></div>
+  </section>
+
+  <section class="col" id="right">
+    <h2>Zadania</h2>
+    <div id="jobs"></div>
+    <h2>Dźwięk</h2>
+    <div class="box" style="margin-bottom:10px">
+      <div id="voiceInfo" class="muted" style="margin-bottom:6px"></div>
+      <div class="actions" style="margin:0 0 6px"><select id="vSel"></select><button id="vSet" class="alt">Ustaw głos</button></div>
+      <input id="vDesc" placeholder="Opis głosu do zaprojektowania (angielski)" style="width:100%;margin-bottom:6px">
+      <button id="vDesign" class="alt" title="Projektuje głos RAZ i przełącza postać na jego klon, żeby każda kwestia miała ten sam głos">Zaprojektuj głos i sklonuj</button>
+      <textarea id="vText" rows="2" placeholder="Kwestia lektora (angielski; polskiego nie obsługuje Qwen3-TTS)" style="margin-top:8px"></textarea>
+      <div class="actions" style="margin:0 0 8px"><button id="vSpeak">Mów</button></div>
+      <input id="mPrompt" placeholder="Opis muzyki (angielski; tempo i tonację wpisz w opisie)" style="width:100%;margin-bottom:6px">
+      <div class="actions" style="margin:0"><label class="muted">dł. (s) <input id="mDur" type="number" min="10" max="300" value="30" style="width:64px"></label>
+        <button id="mMake" class="alt">Generuj muzykę</button></div>
+    </div>
+    <h2>Wyniki</h2>
+    <div class="actions" style="margin:0 0 8px;flex-wrap:wrap">
+      <button id="stitchBtn" class="alt">Sklej zaznaczone klipy</button>
+      <label class="muted">przenikanie (s) <input id="fade" type="number" min="0" max="2" step="0.1" value="0" style="width:64px"></label>
+      <label class="muted">dźwięk klipów <select id="aMode"><option value="normalize">normalizuj</option><option value="keep">zachowaj</option><option value="mute">wycisz</option></select></label>
+      <label class="muted">podkład (dB) <input id="bedDb" type="number" min="-40" max="0" step="1" value="-20" style="width:64px"></label>
+    </div>
+    <div id="gallery" class="gallery"></div>
+  </section>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="/static/app.js"></script>
+<script src="/static/film.js"></script>
+</body>
+</html>
