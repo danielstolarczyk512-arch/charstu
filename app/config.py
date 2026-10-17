@@ -31,6 +31,8 @@ PROVIDER = os.getenv("PROVIDER", "mock").strip().lower()
 SOGNI_API_KEY = os.getenv("SOGNI_API_KEY", "").strip()
 SAFE_CONTENT_FILTER = _bool("SAFE_CONTENT_FILTER", "true")
 SOGNI_BILLING_MODE = os.getenv("SOGNI_BILLING_MODE", "subscription")
+# Ile razy wznowic workflow wstrzymany przez przeglad bezpieczenstwa (safety_review_required) z safe_content_filter=false. 0 = nie wznawiaj.
+SAFETY_RESUME_ATTEMPTS = int(os.getenv("SAFETY_RESUME_ATTEMPTS", "2"))
 SOGNI_MAX_CAPACITY_UNITS = float(os.getenv("SOGNI_MAX_CAPACITY_UNITS", "40"))
 IMAGE_MODEL = os.getenv("IMAGE_MODEL", "krea-2-turbo")
 EDIT_MODEL = os.getenv("EDIT_MODEL", "krea-identity-edit")

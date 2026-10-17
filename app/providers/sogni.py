@@ -223,9 +223,18 @@ class SogniProvider(Provider):
         text = json.dumps(info, ensure_ascii=False)
         return text[:900] if info else f"brak szczegolow w odpowiedzi; klucze: {sorted(wf.keys())}"
 
+    def _resume_safety(self, wid: str) -> bool:
+        """Odblokowuje workflow wstrzymany przez przeglad bezpieczenstwa: POST /workflows/{id}/resume z
+        safe_content_filter=false (pole per zadanie wg dokumentacji; konto 18+ uprawnione). Zwraca True, gdy HTTP przyjal zadanie.
+        Format odpowiedzi /resume NIE zostal zweryfikowany prawdziwym renderem."""
+        r = self._call("POST", f"/v1/creative-agent/workflows/{wid}/resume", json={"safe_content_filter": False},
+                       headers={"Idempotency-Key": str(uuid.uuid4())})
+        return r.status_code in (200, 201, 202)
+
     def _poll(self, wid: str, timeout: float) -> dict:
         deadline = time.time() + timeout
         delay = 3.0
+        resumes = 0
         while time.time() < deadline:
             r = self._call("GET", f"/v1/creative-agent/workflows/{wid}")
             if r.status_code != 200:
@@ -238,9 +247,15 @@ class SogniProvider(Provider):
                 return wf
             if status == "waiting_for_user":
                 if wf.get("waitingReason") == "safety_review_required":
+                    # Tylko ten jeden powod wstrzymania jest wznawiany (B1); zwykla odmowa (status failed) nie jest ponawiana.
+                    if resumes < config.SAFETY_RESUME_ATTEMPTS and self._resume_safety(wid):
+                        resumes += 1
+                        time.sleep(2.0)
+                        continue
                     raise SafetyRejected(
-                        "Dostawca odrzucil tresc (SAFETY_REJECTED). Program nie ponawia z innym filtrem; "
-                        "zmien prompt albo ustawienie filtra recznie.")
+                        f"Dostawca wstrzymal zadanie do przegladu bezpieczenstwa (safety_review_required) i po {resumes} "
+                        f"wznowieniach z safe_content_filter=false nadal je wstrzymuje (limit {config.SAFETY_RESUME_ATTEMPTS}). "
+                        "Zmien prompt albo sprawdz uprawnienia konta 18+ (SAFETY_REJECTED).")
                 raise ProviderError(f"Workflow czeka na uzytkownika: {wf.get('waitingReason')}. {self._last_message(wf)}")
             time.sleep(delay + random.random())
             delay = min(delay * 1.4, 20.0)
