@@ -31,7 +31,9 @@ Test dymny: `.venv\Scripts\python -m tests.smoke`
 
 ### Filtr treści
 `SAFE_CONTENT_FILTER` w `.env` to oficjalne ustawienie Sogni (`safe_content_filter`). `false` wymaga uprawnionego
-konta 18+. Przy odrzuceniu (`SAFETY_REJECTED`) program **nie ponawia** z innym filtrem, tylko pokazuje błąd.
+konta 18+. Przy zwykłej odmowie (`SAFETY_REJECTED`) program **nie ponawia** z innym filtrem, tylko pokazuje błąd. Wyjątek: gdy workflow stanie na
+`safety_review_required`, program wznawia go (`POST .../resume` z `safe_content_filter: false`, `SAFETY_RESUME_ATTEMPTS`, domyślnie 2). Po `/resume` stan jeszcze
+kilkanaście sekund pozostaje na przeglądzie, więc program czeka, zanim uzna wznowienie za nieudane (zmierzone sondą, n=1).
 Ochrona dzieci działa osobno i nie zależy od tego ustawienia.
 
 ### Koszty
@@ -48,8 +50,9 @@ Wyniki u Sogni wygasają po ok. 48 h, więc program pobiera je od razu do `data/
 - `app/` backend (FastAPI, SQLite, kolejka z limitami 4 obrazy / 1 wideo / 2 dźwięk, dostawcy w `app/providers`):
   `pipeline.py` (zlecanie zadań), `film.py` + `films_api.py` (model i API filmu), `director.py` (reżyser AI),
   `producer.py` (produkcja seryjna), `film_assemble.py` (montaż), `stitch.py` / `audio.py` (ffmpeg), `assistant.py`,
-  `guard.py` (miara twarzy), `models.py` (profile modeli)
-- `static/` interfejs (Studio: kamera 3D w three.js, kanon, galeria, dźwięk; Film: `film.js`)
+  `guard.py` (miara twarzy, także para A/B), `models.py` (rejestr modeli), `catalog_sync.py` (katalog z API),
+  `duet.py` + `duet_api.py` (tryb Duet)
+- `static/` interfejs (Studio: kamera 3D w three.js, kanon, galeria, dźwięk; Film: `film.js`; Duet: `duet.js`; listy modeli: `models.js`)
 - `data/` baza, kanon i wyniki (lokalnie)
 - `tests/` testy (`smoke`, `models_test`, `assistant_test`, `audio_test`, `audio_api_test`, `film_test`, `director_test`,
   `film_assemble_test`) i skrypty doświadczalne z prawdziwym Sogni (`voice_experiment`, `live_film`, ...)
@@ -159,6 +162,37 @@ otoczenie jest spójne), ujęcie ma kamerę, akcję, strój, kwestię, czas 2-20
 Edycja ręczna: każde pole ujęcia/sceny, przenoszenie, usuwanie, "Obraz/Klip/Kwestia" osobno, "Reset" (zaczyna od zera), wybór
 obrazu spośród kandydatów. Testy: `python -m tests.film_test` (42), `director_test` (17), `film_assemble_test` (18).
 
+## Duet (widok "Duet": dwie osoby w jednym kadrze)
+Okno obok Studia i Filmu: wybierasz postać A i partnera B, interakcję z biblioteki (albo własny opis i własny obraz układu ciał), stroje obu osób (puste = jak w kanonie),
+kamerę i liczbę wariantów (2-4), a potem "Generuj". Z obrazu pary robisz "Klip z tego ujęcia" (i2v) albo "Klip start→koniec", a klipy sklejasz istniejącą sklejką (`stitch.py`).
+Przy obrazach widać dwie liczby: podobieństwo twarzy do kanonu A i do kanonu B. Postacie muszą być fikcyjne i dorosłe (18+); teksty partnera i interakcji przechodzą przez tę samą siatkę wieku.
+
+Jak to działa: model edycji dostaje referencje w kolejności `[A_twarz, B_twarz]` (i, gdy model ma 3 miejsca, trzeci obraz = układ ciał z biblioteki interakcji);
+prompt jawnie wiąże role ("The first reference image shows Mira ... Exactly two people are visible: Mira and Kael ...") i nigdy nie nazywa partnera "the character".
+Tryb wymaga modelu edycji z `max_refs >= 2`: **Qwen Image Edit (3 referencje)** jest domyślny (`PARTNER_MODEL`), Krea / Dark Beast Identity Edit (2) działają, ale
+program ostrzega "brak slotu na referencję pozy/kąta" (obraz układu jest wtedy pomijany). Sylwetka i widok kierunkowy nie wchodzą do referencji pary: twarz ma priorytet.
+Minimalny kanon partnera to twarz + sylwetka (2 ujęcia, nie 8): wgraj obraz twarzy albo wygeneruj oba z opisu karty i zatwierdź. Film może mieć partnera (`partner_id`):
+producent używa wtedy ścieżki Duet, a reżyser AI planuje ujęcia dla dwóch osób (czas do 15 s tylko z partnerem).
+Biblioteka interakcji (`data/interactions/`, tabela `interactions`): 10 pozycji startowych (opisy po angielsku, bez obrazów) i własne; obraz układu dodajesz sam
+(wyłącznie wygenerowany lub rysunek, nie zdjęcie prawdziwej osoby).
+Konfiguracja: `PARTNER_MODEL`, `DUET_MAX_REFS`, `INTERACTION_DEFAULT` w `.env`. Testy bez modelu: `python -m tests.duet_test`. Wyniki prawdziwych renderów: `DUET_RAPORT.md`.
+
+**Co jest niepewne (czytaj przed użyciem):**
+- Jakość trzymania obu tożsamości to wynik loterii, nie gwarancji: w teście na Qwen 4 z 6 par było dobrych, jedna miała trzecią osobę, na Dark Beast (2 referencje) tożsamość
+  partnerki dryfowała (n=6+2, jedna osoba oceniająca, jeden wariant na ujęcie). Dlatego "Generuj" daje 2-4 warianty.
+- Obraz układu ciał potrafi przenieść ubranie z obrazu. Pomaga wypełniona karta postaci (strój opisany słowami trafia do promptu); w teście 3 z 4 układów wyszły poprawnie bez przecieku (n=4).
+- Pomiar twarzy A/B jest orientacyjny (jak w sekcji "Pomiar twarzy"), bezużyteczny przy odwróconej twarzy i **nie był jeszcze uruchomiony na prawdziwych obrazach par**;
+  liczby nie mówią, czy osoby się nie zlały.
+- Sceny jednoznacznie seksualne (missionary, cowgirl, doggy, oral z biblioteki) nie były przeze mnie renderowane; mechanizm jest ten sam co dla scen w ubraniach,
+  ale jak model zareaguje na takie opisy i obrazy układu, trzeba sprawdzić samemu.
+- Klip start→koniec dla pary może mieć "duchy" w środku (zmierzone raz); klipy dłuższe niż 8 s i partner w filmie z klipami 15 s nie były sprawdzane.
+
+## Modele: lista wyboru i pokrycie planem
+Wszystkie pola modelu w interfejsie to listy rozwijane zasilane z `/api/models` (rejestr `app/models.py` scalony z katalogiem Sogni, cache w `data/model_catalog.json`, przycisk
+"Odśwież katalog"). Każda pozycja ma znacznik **w planie** (Unlimited, fair use, bez Premium Spark) albo **Premium Spark** (poza planem), a także "niesprawdzony" i
+"nieznany, sprawdź". Wybór modelu spoza planu pokazuje ostrzeżenie i wymaga zgody; zadanie idzie z `billing_mode: "tokens"`, a saldo Premium Spark jest sprawdzane przed wysłaniem.
+Własny identyfikator wpisujesz przez ostatnią pozycję listy. Identyfikatory modeli wideo sprawdza walidacja Sogni (lista dozwolonych wartości w `DUET_RAPORT.md`), modeli obrazu - dopiero render.
+
 ## Limity okresu próbnego Sogni (zmierzone 16.10.2026)
 - **MiniMax H3: 6 klipów na dobę UTC w okresie próbnym** ("Start your paid Unlimited plan to keep creating"). Dotyczy przejść
   start→koniec (`FLF_MODEL`). Po wyczerpaniu program robi zwykłe klipy LTX.
@@ -167,5 +201,5 @@ obrazu spośród kandydatów. Testy: `python -m tests.film_test` (42), `director
 - Lektor Qwen3-TTS nie obsługuje polskiego.
 
 ## Ograniczenia i plany
-Jeden bohater na film (kanon jednej postaci); podkład jeden na cały film; wynik oceniany wizualnie (twarz: miara orientacyjna);
+Jeden bohater na film (opcjonalnie plus partner, patrz Duet); podkład jeden na cały film; wynik oceniany wizualnie (twarz: miara orientacyjna);
 brak upscalingu (FlashVSR), keyframes pośrednich H3 i ruchu kamery sterowanego geometrią. Szczegóły i pomiary: ETAP0_RAPORT.md.

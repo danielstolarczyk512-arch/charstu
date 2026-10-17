@@ -3,6 +3,18 @@
 Branch `duet`. Raport rosnie z kazdym etapem; sekcje oznaczone jawnie, co zweryfikowano, a czego nie.
 Konwencja jak w `ETAP0_RAPORT.md`: ocena obrazow jest wizualna i na malych probach, testy automatyczne to nie gwarancja jakosci renderu.
 
+## Podsumowanie kryteriow akceptacji (szczegoly i zastrzezenia w sekcjach nizej)
+| Kryterium z briefu | Wynik | Proba |
+|---|---|---|
+| 6 par na Qwen: 4/6 trzyma obie tozsamosci i trafia w interakcje | **spelnione: 4/6** (+1 czesciowo, 1 porazka: trzecia osoba) | n=6, 1 wariant, ocena wizualna |
+| 2 pary na Dark Beast Identity Edit | interakcja 2/2, tozsamosc partnerki slabsza (zmiana stroju, twarz) | n=2 |
+| 4 obrazy z obrazem interakcji: 2/4 poprawny uklad bez przecieku ubran | v1 promptu: **niespelnione** (uklad 4/4, przeciek 4/4); v2 (strój z karty slowami): **spelnione 3/4** | n=4 + 4, jeden seed |
+| 2 klipy (i2v, start->koniec): obie osoby, bez zlania | **spelnione** (start->koniec z duchami w srodku) | n=2 |
+| 1 film 2x2 z partnerem: plan sensowny, brak odmowy filtra, zmontowane | **spelnione** (19,9 s) | n=1 |
+| Zero Premium Spark | **spelnione** (saldo 0 przed i po; ok. 357 Spark wartosci planu, 54 zadania) | licznik planu |
+| `billing_mode: tokens` dla `wan3.0-spicy-video` | odrzucone HTTP 402 (errorCode 123) przed startem, plan nietkniety; **pelny sukces na Premium Spark niesprawdzony** (saldo 0) | n=2 zapytania |
+Pomiar twarzy A/B (InsightFace): **niezweryfikowany na prawdziwych obrazach**. Sceny jednoznacznie seksualne: **nie renderowalem** (patrz sekcja E).
+
 ## A. Analiza: miejsca zakladajace jedna osobe lub sprzeczne z 18+ dwuosobowym
 
 Przeszukane: `app/prompts.py`, `pipeline.py`, `film.py`, `producer.py`, `guard.py`, `assistant.py`, `director.py`,
@@ -49,3 +61,201 @@ Przeszukane: `app/prompts.py`, `pipeline.py`, `film.py`, `producer.py`, `guard.p
 | 28 | `main.estimate`, `producer.COST` | Koszty szacowane tylko dla jednego obrazu; Duet wysyla 2-4 warianty | Szacunek budzetu dla filmu Duet bedzie zanizony, dopoki `COST["image"]` nie uwzgledni wariantow. |
 
 Nie znaleziono: odwolan do filtra w `film_assemble.py`, `stitch.py` ani `audio.py` (nie dotycza tresci).
+
+## B. Trzy naprawy
+
+### B1. Wznawianie po `safety_review_required` (`providers/sogni.py::_poll`, test `tests/safety_resume_test.py`)
+- Zamiast `SafetyRejected` od razu: `POST /v1/creative-agent/workflows/{id}/resume` z `safe_content_filter: false`, maks. `SAFETY_RESUME_ATTEMPTS`
+  (domyslnie 2), potem czytelny `SafetyRejected` (komunikat zawiera `SAFETY_REJECTED`, wiec producent nadal nie traktuje go jako bledu przejsciowego).
+  Zwykle odmowy (status `failed`) i inne `waitingReason` nie sa ponawiane.
+- **Pierwsza wersja nie dzialala na prawdziwym koncie** i pokazala to dopiero sonda (`tests/resume_probe.py`): `/resume` odpowiada HTTP 202, ale stan
+  zostaje `safety_review_required` jeszcze przez ok. 4 odpytania co 4 s i dopiero potem przechodzi w `completed`. Moja pierwsza wersja zuzywala
+  oba wznowienia w ciagu kilku sekund i rzucala `SafetyRejected` mimo ze zadanie by sie wykonalo. Poprawka: karencja po `/resume`
+  (`RESUME_GRACE_POLLS`=10 odpytan) przed kolejna proba. Zweryfikowane sonda na 1 zadaniu (Dark Beast Identity Edit, filtr `true` przy starcie):
+  1 wznowienie wystarczylo, zadanie sie wykonalo.
+- Obserwacja: zadanie z `safe_content_filter: true` na modelu Dark Beast trafilo do przegladu bezpieczenstwa nawet przy niewinnym promptcie
+  (poza z mieczem). Zadania renderow Duetu szly z filtrem `false` od startu (`.env`: `SAFE_CONTENT_FILTER=false`); nie logowalem, czy ktores z nich
+  przeszlo przez wstrzymanie i wznowienie, wiec nie wiem, jak czesto B1 jest faktycznie potrzebne przy filtrze `false`.
+- Test: 8/8 z atrapa HTTP. Atrapa sprawdza logike petli, nie zachowanie Sogni (to sprawdzila sonda, n=1).
+
+### B2. Zdanie o liczbie osob jako parametr (`prompts.py`, test `tests/prompts_test.py`)
+- `image_prompt(..., presence=None)` i `pose_prompt(..., presence=None)`; domyslnie jak dawniej, dla pary `prompts.two_people(A, B)`:
+  "Exactly two people are visible: {A} and {B}. Keep both faces, both hairstyles and the scene unchanged."
+- `prompts.wearing()` / `_described()`: "wearing" pomijane dla opisow zaczynajacych sie od nude/naked/topless/bottomless/bare (takze z przyslowkiem:
+  "fully nude", "completely naked"); "barely dressed" nadal dostaje "wearing".
+- **Sciezka jednej postaci bez zmian**: zrzut 139 promptow zrobiony z kodu PRZED zmiana (`tests/golden_prompts.json`) jest identyczny po zmianach
+  (test R1; obejmuje wszystkie style, `with_refs` on/off, stroj puste/wypelnione, 1 i 2 referencje, poze, klip, `character_block`).
+- Pulapka znaleziona po drodze: znak `\b` zapisany przez skrypt w powloce trafil do pliku jako backspace (0x08), regex po cichu nie dzialal; wykryl to test W1.
+
+### B3. `plan_pose` wg profilu modelu (`pipeline.py`, `models.py`)
+- Zamiast `"krea" in model`: `op == "edit"`, `max_refs >= 2` i nowe pole profilu `pose_transfer` (True / False / None = nie sprawdzono) z powodem `pose_note`.
+  `krea-identity-edit`: `pose_transfer=False` (wynik testu z 17.10 w README) z jego powodem w komunikacie; `qwen`: True.
+- **Render** (`tests/pose_dark_beast_experiment.py`, te same wejscia co eksperyment 3 dla Qwen, n=2): `dark-beast-krea2-identity-edit` z kanonem jako 1. obrazem
+  **przenosi poze** (uniesiony miecz, klek), ale z przeciekiem pancerza i koloru plaszcza ze zdjecia pozy; z odwrocona kolejnoscia obrazow (poza jako 1.)
+  poza nie przeszla (zwrocil scene kanonu). Wynik: odrzucenie zdjete (`pose_transfer=True`), z opisem zastrzezen w `note`. Ocena wizualna, n=2, jeden model.
+- Koszt eksperymentu: ok. 21 Spark wartosci, 2 zadania.
+
+## Modele i pokrycie planem (dodatek do briefu)
+
+- `models.Profile` ma teraz `kind` (image/edit/video/flf/music/speech/llm), `covered`, `category`, `catalog`, `known`, `i2v`; `catalog()` zwraca wszystkie rodzaje
+  zgrupowane po `kind` (klucz `generate` zostaje aliasem `image`). `covered=False` zawsze ma powod w `note`. Istniejace wartosci `tested` nie zostaly zmienione.
+- `billing_mode` zyje na poziomie zadania: `GenRequest.billing_mode`, ustawiany w `runner.job_billing()` (`tokens` dla modelu poza planem, inaczej `SOGNI_BILLING_MODE`;
+  glos i muzyka wedlug konfiguracji). `confirm_cost: true` i przycisk "Wyceń" zostaly.
+- Bramka Spark (`pipeline.check_spark`): model poza planem (takze nieznany identyfikator = `covered=False`) wymaga jawnej zgody (`allow_spark`; w UI pole
+  "Potwierdzam zuzycie Premium Spark", w filmie `films.allow_spark`), a saldo Premium Spark (`GET /v1/account/balance`, pole `net`) jest sprawdzane PRZED wyslaniem
+  (HTTP 402 z komunikatem). Znaczenie pol `/v1/account/balance` nie jest udokumentowane - odczyt na koncie: wszystkie 0.
+- Katalog z API (`app/catalog_sync.py`): `GET /v1/model-catalog` (501 pozycji) i `GET /v1/models` (3 LLM), cache `data/model_catalog.json`, przycisk "Odśwież katalog",
+  fallback do wbudowanej listy, ostrzezenie w logu o domyslnych modelach z `.env`, ktore zniknely; pozycje z rejestru nie znikaja (tylko `available=False`);
+  nieznane pozycje katalogu (bez `coreml-*`) pojawiaja sie jako "nieznany, sprawdź".
+- UI: wszystkie pola modelu to listy rozwijane (Studio: obraz, edycja, klip; Film: obraz, edycja + zgoda na Spark; Duet: edycja, klip) zasilane z `/api/models`,
+  grupy wg kategorii, najpierw modele z planu, znaczniki "w planie" / "Premium Spark" / "niesprawdzony" / "nieznany, sprawdź", ostrzezenie przed wyslaniem.
+  Wlasny identyfikator: ostatnia pozycja "Własny identyfikator…" (okno z polem, zapamietany w przegladarce). Test `models_plan_test` pilnuje, ze w `static/*.js`
+  nie ma zaszytych identyfikatorow.
+
+### Identyfikatory z listy w dodatku NIE wszystkie istnieja (sprzecznosc brief <-> API, poszlismy za API)
+Walidacja Sogni (`400`, bez kosztu) wypisuje dozwolone `videoModel`. Dla `generate_video`: `ltx25, ltx23, wan22, seedance2, seedance2-mini,
+seedance2-mini-uncensored, seedance2-5, seedance2-5-uncensored, minimax-h3-t2v(-turbo|-balanced), minimax-h3-fasth3-t2v-turbo(-2stage), happyhorse-1.1-t2v|i2v|r2v,
+minimax-h3-r2v*, wan3.0-video, wan3.0-spicy-video`; dla `animate_photo`: `ltx25, ltx23, wan22, happyhorse-1.1-i2v|r2v, minimax-h3-i2v(-balanced|-turbo),
+minimax-h3-fasth3-i2v-turbo(-2stage), minimax-h3-flf2v(-balanced|-turbo), minimax-h3-fasth3-flf2v-turbo(-2stage), wan3.0-video, wan3.0-spicy-video`.
+| Z briefu | Stan | Co jest w rejestrze |
+|---|---|---|
+| `wan3`, `wan3-uncensored` | odrzucone przez walidacje | `wan3.0-video`, `wan3.0-spicy-video` (covered=False) |
+| `seedance-2-0`, `-mini`, `seedance-2-5` | odrzucone | `seedance2`, `seedance2-mini`, `seedance2-5` + warianty `-uncensored` (covered=False, tylko tekst->wideo, `i2v=False`) |
+| `happyhorse-1-1` | odrzucone | `happyhorse-1.1-i2v` (covered=False) |
+| `minimax-h3`, `minimax-h3-turbo` | odrzucone | `minimax-h3-i2v`, `minimax-h3-i2v-turbo`, `minimax-h3-fasth3-i2v-turbo`; `-2stage` = covered=False (tag premium w katalogu) |
+| `ltx23-22b-10eros-v1.4-fp8mixed_i2v` | jest w katalogu, ale NIE jako `videoModel` | usuniete z listy wyboru (nie bylo jak go uzyc) |
+| LLM `deepseek-v4-flash-vision-exp`, `qwen-3-5-35b-abliterated` | inne id w `/v1/models` | `deepseek-v4-flash-vision-exp-dspark-1m`, `qwen3.5-35b-a3b-abliterated-gguf-q4km` |
+| obrazowe `dark-beast-z-image-turbo`, `krea-2-identity-edit-lora-v1-2`, `albedobase-xl`, `juggernaut-xl`, ... | **nie do zweryfikowania walidacja** (argument `model` nie jest enumerowany, przechodzi nawet `__zzz__`) | w rejestrze z `tested=False`; potwierdzi je dopiero render |
+| `chroma` | nie dodane | zostaja `chroma-v46-flash`, `chroma1-hd` (zweryfikowane w Etapie 0) |
+
+### Weryfikacja `billing_mode` i pokrycia planem prawdziwym zadaniem (`tests/billing_probe.py`)
+- Zadanie `generate_video` na `wan3.0-spicy-video` (5 s), `billing_mode: "tokens"`, `confirm_cost: false` i `true`: **HTTP 402, errorCode 123**
+  ("requires credit-card-purchased Premium Spark Points or a VIP account. Top up Premium Spark"). Licznik planu przed i po: 283,06 -> 283,06 (roznica 0,0),
+  saldo 0. Zadanie nie wystartowalo, **plan nie zostal ruszony**. To potwierdza, ze `wan3.0-spicy-video` jest poza planem i ze `billing_mode: tokens` jest respektowane
+  jako tryb zlecenia - ale **nie sprawdzilem pelnego sukcesu zadania na Premium Spark**, bo konto ma saldo 0 (nie dokupilem Spark). Rozdzielczosc 480p NIE zostala ustawiona
+  (nazwa argumentu nie jest potwierdzona, a Sogni ignoruje nieznane).
+- **Poprawka tezy z dodatku**: z `billing_mode: "subscription"` to samo zadanie tez dostaje natychmiast HTTP 402 (errorCode 123) - nie "cicho sie zacina".
+  Realna korzysc z `billing_mode` per zadanie to wiec poprawne rozliczenie zadan, ktore moga isc na Spark, oraz zgoda i kontrola salda przed wyslaniem.
+- Zadania na modelach z planu wychodza z `billing_mode` z konfiguracji (test B2/B4/B5/A4) i nie ruszaja Spark (licznik planu rosnie, saldo 0 bez zmian).
+- Koszt: 0 Spark, 0 zadan (oba zapytania odrzucone).
+- Uwaga o koncie: `GET /v1/subscriptions/usage` zwraca `trialEndsAt: 2026-10-19`, wiec konto jest jeszcze w okresie probnym (limity z README: H3 6/dobe UTC).
+
+## C. Duet: co zbudowano
+
+Commity: `analiza`, `B1`, `B2`, `B3`, `modele`, `duet-rdzen`, `duet-okno`, `duet-test`, `raport`.
+- Dane: `characters.kind`, `shots`/`films`/`film_shots`: `partner_id`, `interaction`, `outfit_b`; `artifacts.face_score_b/face_min_b`; tabela `interactions`.
+  Migracja idempotentna w `app/db.py` (test E1: stara baza, dwa uruchomienia, dane zostaja). Usuwanie postaci uzywanej jako partner jest blokowane (409), bo SQLite uzywa
+  ponownie numerow wierszy.
+- `prompts.duet_prompt`, `pipeline.select_refs_duet` / `plan_image_duet` / `submit_image_duet`, bramka modelu (edycja z `max_refs >= 2`, ostrzezenie
+  "brak slotu na referencję pozy/kąta" przy 2 referencjach), `video_prompt` w trybie pary, `guard.match_faces` + `similarity_duet` + `video_scores_duet`, `runner._measure_duet`,
+  film i rezyser z partnerem (czas do 15 s tylko z partnerem), siatka `_MINOR` na partnerze i interakcjach.
+- Okno "Duet": `app/duet.py`, `app/duet_api.py`, `static/duet.js` (wybor A i B, minimalny kanon partnera, biblioteka 10 pozycji + wlasne, opis interakcji, stroje A i B,
+  kamera, 2-4 warianty, klip z ujecia, klip start->koniec, sklejka przez istniejacy `/api/stitch`, dwie liczby twarzy). Wybory pamietane w przegladarce.
+- Odstepstwa od briefu: (1) trzeci slot referencji jest tylko na obraz interakcji - sylwetka/kat nie wchodza do referencji pary (twarz ma priorytet),
+  (2) `INTERACTION_DEFAULT` zadeklarowany w konfiguracji i zwracany przez `/api/duet/config`, ale okno nie wybiera go automatycznie (wybor jest zapamietywany w przegladarce),
+  (3) biblioteka ma opisy tekstowe bez obrazow (obrazy dodaje uzytkownik).
+
+## D. Testy automatyczne (bez modelu)
+| Test | Wynik |
+|---|---|
+| smoke | OK (4 zadania, 1 klip) |
+| models_test | 29/29 (bylo 26, +3 nowe) |
+| film_test | 42/42 (na Windows wymaga `PYTHONIOENCODING=utf-8`) |
+| director_test | 17/17 |
+| film_assemble_test | 18/18 |
+| audio_test / audio_api_test | 21/21, 18/18 |
+| character_test | 40/40 |
+| **nowe:** safety_resume_test | 8/8 |
+| prompts_test (regresja jednej postaci + B2) | 16/16 |
+| models_plan_test | 40/40 |
+| duet_test | 69/69 |
+`assistant_test` wymaga dzialajacego serwera i modelu (`STUDIO_URL`) - nie uruchamialem.
+Testy to nie gwarancja jakosci obrazu: nie mowia nic o tym, czy render trzyma twarze.
+
+## E. Weryfikacja prawdziwym renderem (Sogni, konto z planem, `SAFE_CONTENT_FILTER=false`)
+Warunki: kopia bazy i kanonu w katalogu tymczasowym (Twoj `data/studio.db` nietkniety), postac A = istniejaca Aria (kanon: 1 obraz twarzy/calej postaci, sylwetka,
+przod), partner B = nowy fikcyjny dorosly "Kael" z minimalnym kanonem (twarz + sylwetka wygenerowane z opisu karty przez okno Duet, po 1 obrazie, oba zatwierdzone).
+Ocena **wylacznie wizualna, jedna osoba oceniajaca (ja), male proby, 1 wariant na ujecie**. Pomiar twarzy (InsightFace) NIE byl uruchomiony na prawdziwych obrazach
+(biblioteka nie jest zainstalowana w uzytym srodowisku), wiec "dwie liczby A/B" sa zweryfikowane tylko na sztucznych wektorach.
+**Zakres tresci:** sceny par byly celowo ubrane/nieeksplicytne (uscisk, pocalunek, siedzenie na kolanach, spooning pod kocem, oparcie o sciane, spacer za reke).
+Pozycji jednoznacznie seksualnych (missionary, cowgirl, doggy, oral) **nie renderowalem** - mechanizm (dwie tozsamosci, interakcja, uklad z obrazu referencyjnego)
+jest ten sam, wiec wynik na nich nalezy sprawdzic samemu; nie ocenilem, jak model zareaguje na takie opisy.
+Pliki: `data/duet_render/` (poza gitem), arkusze `sheet_*.png`.
+
+### E1. 6 par na Qwen Image Edit + 2 na Dark Beast Identity Edit (kryterium: 4/6 trzyma obie tozsamosci i trafia w interakcje)
+| Ujecie (Qwen) | Dwie osoby | Tozsamosci A i B | Interakcja | Uwagi |
+|---|---|---|---|---|
+| uscisk na klifie | tak | trzyma | trafiona | |
+| pocalunek na ulicy | tak | trzyma | trafiona (pocalunek blisko policzka) | |
+| siedzenie na kolanach | **NIE: trzy osoby** | - | - | po prawej ogromna, przycieta druga twarz Kaela; "Exactly two people" nie wystarczylo |
+| spooning pod kocem | tak | trzyma | czesciowo (leza obok siebie, nie "lyzeczka") | Kael w zbroi w lozku |
+| oparcie o sciane | tak | trzyma | trafiona | |
+| spacer za reke | tak | trzyma | trafiona | |
+**Qwen: 4/6 spelnia kryterium (uscisk, pocalunek, sciana, spacer), 1 czesciowe, 1 porazka (trzecia osoba).** Probka mala; wynik moze sie zmienic przy innych seedach.
+| Ujecie (Dark Beast) | Interakcja | Tozsamosc |
+|---|---|---|
+| uscisk | trafiona | Kael trzyma; Mira: warkocz i kolor wlosow ok, ale strój zmieniony (granatowy zamiast zielonej peleryny), twarz slabo przypomina kanon |
+| pocalunek | trafiona (prawdziwy pocalunek) | jak wyzej |
+Dark Beast (2 referencje, ostrzezenie o braku slotu pokazane): interakcja 2/2, tozsamosc A slabsza niz na Qwen. n=2, wniosek wstepny.
+Koszt: Qwen 42,2 Spark / 6 zadan, Dark Beast 13,9 / 2, kanon B 4,3 / 2.
+
+### E2. Obraz interakcji jako 3. referencja (kryterium: 2/4 poprawne ulozenie bez przecieku ubran)
+Obrazy ukladu (generowane, bez prawdziwych osob): pierwszy zestaw na Krea 2 Turbo odrzucilem (uciete glowy, zly uklad); drugi na Qwen 2512 byl uzywalny
+dla 3 z 4 (uscisk, na kolanach, spooning), a "przy scianie" mial trzy osoby i wygenerowalem go trzeci raz. Obrazy dodane do biblioteki jako obraz pozycji;
+referencje `[A_twarz, B_twarz, obraz_ukladu]`.
+- **Wersja 1 promptu** ("keeps the outfit from the first reference image"): uklad przeniosl sie **4/4**, ale **ubrania przeciekly we wszystkich czterech**
+  (beżowe koszulki z obrazu ukladu zamiast peleryny Miry i zbroi Kaela; twarze dryfowaly, Mira postarzala sie). Kryterium 2/4 **niespelnione** (best case 1/4: sciana).
+- Poprawka: przy obrazie ukladu prompt podaje strój z karty slowami ("Mira wears ... as in the first reference image, not the clothes of the people in the third
+  reference image") - ten sam mechanizm co w `pose_prompt` (wniosek z README: bez konkretow model kopiuje obraz pozy).
+- **Wersja 2**: stroje A i B zachowane we wszystkich 4 (peleryna i skorzana zbroja Miry, granatowa tunika i napiersnik Kaela); uklad: sciana - trafiony (role zachowane),
+  na kolanach - trafiony, uscisk - trafiony (Mira wyglada na starsza niz w kanonie), spooning - uklad slaby (leza, ale nie lyzeczka).
+  **3/4 poprawne ulozenie bez przecieku ubran: kryterium spelnione** (n=4, jeden seed). Przeciek ubran z obrazu ukladu da sie ograniczyc opisem stroju w prompcie, ale tylko gdy karta postaci ma wypelniony strój.
+- Koszt: obrazy ukladu ok. 27 Spark / 9 zadan (czesc wyrzucona), v1 ok. 28 / 4, v2 ok. 28 / 4.
+
+### E3. Klipy (kryterium: obie osoby obecne, brak zlania sie w jedna)
+- i2v (LTX 2.5, 5 s, 1344x768) z obrazu pocalunku: obie osoby obecne i rozdzielne przez caly klip (powolny najazd), tozsamosci stabilne. Spelnione.
+- start->koniec (H3 flf2v turbo, 5,9 s) miedzy uściskiem z Qwen a uściskiem z obrazem ukladu: obie osoby obecne, bez zlania; w srodku klipu widoczne
+  duchy/morfowanie (podwojny obraz wlosow i kaptura ok. 3. sekundy), koniec zgodny z obrazem koncowym. Spelnione z zastrzezeniem.
+- Koszt: 23,0 + 23,9 Spark, 2 zadania. Limit H3 okresu probnego nie wystapil (nie liczylem, ile klipow H3 poszlo tego dnia lacznie).
+
+### E4. Film 2 sceny x 2 ujecia z partnerem (kryterium: sensowny plan, brak odmowy filtra, zmontowane)
+Plan rezysera AI (Qwen3.6) dla filmu "Powrot": 2 sceny (ulica z latarniami, kolacja w karczmie) x 2 ujecia, sensowne kamery i miejsca, obie postacie nazwane w opisach.
+Produkcja: 4 obrazy pary (sciezka Duet, referencje A i B), 4 klipy, podklad muzyczny; montaz 19,9 s, -16,4 LUFS, 1344x768, z dzwiekiem; brak odmowy filtra.
+Obrazy: obie tozsamosci stabilne w 4 ujeciach, strój i miejsce spojne w scenach. Czas: ok. 20 min produkcji. Koszt: 166,7 Spark / 22 zadania.
+Zastrzezenia: rezyser **nie wypelnil** pola `interaction` (opisal interakcje w `action` z imionami), czasy ujec 4-6 s, wiec limit 15 s nie byl w tym tescie sprawdzony;
+jedna kwestia lektora z planu nie zostala nagrana (`speech_needed 1, speech_done 0` - nie badalem przyczyny, film i tak zmontowany).
+
+### Zuzycie (odczyt `GET /v1/subscriptions/usage`, dobowy licznik `renderSpark`)
+Przed renderami Duetu (po eksperymencie B3 i sondzie `/resume`): 283,06 (49 zadan dziennie); po: 639,99 (103 zadania).
+**Renderowanie Duetu: +356,9 Spark wartosci planu, +54 zadania** (zgodne z sumami etapow). Przed pierwszym odczytem poszly jeszcze eksperyment B3
+(20,8 / 2 zadania, zmierzone) i sonda `/resume` (1 zadanie, nie zmierzone). Premium Spark: saldo 0 przed i po - **zero Premium Spark**. Wszystkie modele uzyte w renderach sa na planie (Qwen Image Edit, Dark Beast Identity Edit, Krea 2 Turbo,
+Qwen Image 2512, LTX 2.5, MiniMax H3 flf2v turbo, Qwen3.6 LLM, MiniMax Music 3).
+
+## F. Co wyszlo zle / niepewne
+- Trzecia osoba na obrazie "na kolanach" (Qwen, tylko tekst) - zdanie "Exactly two people are visible" nie gwarantuje liczby osob. Z obrazem ukladu ten sam przypadek wyszedl poprawnie.
+- Przeciek ubran z obrazu ukladu (wersja 1 promptu, 4/4) - ograniczony wersja 2, ale to tylko 4 obrazy.
+- Tozsamosc A na Dark Beast (2 referencje) jest slabsza niz na Qwen (3 referencje).
+- Pierwsza wersja B1 (wznawianie) nie dzialala na prawdziwym koncie; wykryta dopiero sonda.
+- Pomiar twarzy A/B niezweryfikowany na prawdziwych obrazach; ograniczenia: miara orientacyjna (kontrola z ETAP0_RAPORT: ten sam opis z innym seedem dostal wiecej niz edycje z kanonu),
+  bezuzyteczna przy widoku z tylu (0 twarzy), dwie podobne twarze moga zostac zamienione, a liczby nie mowia, czy osoby sie nie zlaly.
+- Nie sprawdzono: sceny jednoznacznie seksualne, 15-sekundowe klipy, pelny sukces zadania na Premium Spark, rozdzielczosc 480p dla WAN 3, `krea-2-identity-edit-lora-v1-2` i inne nowe identyfikatory obrazowe.
+
+## G. Rzeczy znalezione po drodze, ktorych nie naprawialem
+1. `main.create_character` (bohater): brak `_has_minor` przy tworzeniu (jest tylko w `patch_character`); README sugeruje wiecej. Dla partnera (kind=partner) sprawdzane przy tworzeniu.
+2. Pola `action`/`outfit` ujec Studia nie przechodza przez siatke wieku (robi to tylko `film.clean_shot`); `/api/shots` i `/api/preview` bez sprawdzenia.
+3. `providers/sogni.py::_plan`: limit referencji edycji z podciagu `"krea" in model` zamiast profilu modelu (nowe modele edycji spoza tej reguly dostana limit 3).
+4. Usuniecie postaci zostawia jej ujecia (`shots.character_id`) - przy ponownym uzyciu numeru wiersza SQLite ujecia moga trafic do nowej postaci (Duet blokuje tylko usuniecie partnera).
+5. `.venv` w katalogu projektu wskazuje na Pythona innego uzytkownika Windows (`pyvenv.cfg`: `C:\Users\Daniel Stolarczyk\...`) i nie startuje; `.claude/launch.json` uzywa tego venv.
+6. `index.html` nie mial `Cache-Control: no-cache` (pliki `static/*` mialy) - po dodaniu nowych elementow przegladarka serwowala stary HTML i stary `app.js` wywalal sie na nowym DOM (naprawione, bo dotyczylo zmian Duetu).
+7. `producer.COST` nie zna kosztu wariantow Duet ani rzeczywistego kosztu klipow H3; szacunek budzetu filmu pary bedzie zanizony.
+8. Studio `/api/artifacts?character_id=A` pokazuje tez wyniki par (to samo `shots.character_id`).
+9. `tests/film_test` drukuje znaki spoza cp1250 - na Windows pada bez `PYTHONIOENCODING=utf-8`; `assistant_test` wymaga dzialajacego serwera.
+10. Konto jest w okresie probnym do 2026-10-19 (`trialEndsAt`), mimo ze brief mowi o aktywnym planie Unlimited - limity dobowe okresu probnego (README) moga sie jeszcze stosowac.
+11. Rezyser AI nie wypelnia pola `interaction` nawet gdy prompt systemowy o nie prosi (wstawia opis do `action`); dziala, ale pole `outfit_b`/`interaction` w UI filmu nie ma widocznych kontrolek (edycja tylko przez API).
+12. Widok Film nie ma pola partnera przy tworzeniu filmu (tylko API `partner_id`); okno Duet nie tworzy filmow.
+13. Modele `seedance2*` sa tylko tekst->wideo; wybor ich jako modelu klipu z obrazu daje czytelny blad (`i2v=False`), ale lista nadal je pokazuje.
+
+## H. Koszt calosci (od poczatku prac)
+Razem ok. 378 Spark wartosci planu i 57 zadan: B3 (Dark Beast, poza) 20,8 / 2, sonda `/resume` 1 zadanie (nie zmierzone), kanon B i pary 60,3 / 10,
+obrazy ukladu i obrazy z ukladem ok. 83 / 17, klipy 46,9 / 2, film 166,7 / 22 (suma etapow renderow Duetu 356,9 / 54 jest zmierzona licznikiem planu).
+Premium Spark: 0, wszystkie zadania na modelach objetych planem. Sondy `wan3.0-spicy-video` zostaly odrzucone przed startem (0 / 0).
