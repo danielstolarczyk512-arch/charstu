@@ -16,6 +16,7 @@ from .base import GenRequest, GenResult, Provider, ProviderError, SafetyRejected
 BASE = "https://api.sogni.ai"
 TERMINAL = {"completed", "partial_failure", "failed", "cancelled"}
 UA = "character-studio/0.1"
+RESUME_GRACE_POLLS = 10   # tyle odpytan (po 4 s) czekamy po /resume, zanim uznamy wznowienie za nieudane
 
 
 class SogniProvider(Provider):
@@ -235,6 +236,7 @@ class SogniProvider(Provider):
         deadline = time.time() + timeout
         delay = 3.0
         resumes = 0
+        grace = 0   # odpytania od ostatniego /resume (po /resume stan jeszcze kilka odpytan pozostaje "safety_review_required")
         while time.time() < deadline:
             r = self._call("GET", f"/v1/creative-agent/workflows/{wid}")
             if r.status_code != 200:
@@ -248,9 +250,16 @@ class SogniProvider(Provider):
             if status == "waiting_for_user":
                 if wf.get("waitingReason") == "safety_review_required":
                     # Tylko ten jeden powod wstrzymania jest wznawiany (B1); zwykla odmowa (status failed) nie jest ponawiana.
+                    if resumes and grace < RESUME_GRACE_POLLS:
+                        # Sonda 17.10.2026: /resume -> HTTP 202, ale stan wraca do "completed" dopiero po ok. 4-5 odpytaniach
+                        # co 4 s; ponowne /resume od razu zuzywaloby limit prob (pierwsza wersja B1 tak padla).
+                        grace += 1
+                        time.sleep(4.0)
+                        continue
                     if resumes < config.SAFETY_RESUME_ATTEMPTS and self._resume_safety(wid):
                         resumes += 1
-                        time.sleep(2.0)
+                        grace = 0
+                        time.sleep(4.0)
                         continue
                     raise SafetyRejected(
                         f"Dostawca wstrzymal zadanie do przegladu bezpieczenstwa (safety_review_required) i po {resumes} "

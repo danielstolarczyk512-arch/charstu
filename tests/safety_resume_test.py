@@ -99,5 +99,12 @@ except SafetyRejected as e:
     err = e
 check("7 odrzucone /resume: SafetyRejected od razu", err is not None and len(calls["resume"]) == 1)
 
+# 8. karencja po /resume: stan jeszcze kilka odpytan zostaje "safety_review_required" (zachowanie zmierzone sonda), potem completed
+hold = wf("waiting_for_user", "safety_review_required")
+p, calls = make([hold, hold, hold, hold, hold, wf("completed")])
+out = p._poll("w6", 60)
+check("8 po /resume stan trzyma sie kilka odpytan: tylko 1 wznowienie, zadanie konczy sie",
+      out["status"] == "completed" and len(calls["resume"]) == 1, str(len(calls["resume"])))
+
 print(f"\nWYNIK: {sum(results)}/{len(results)}")
 raise SystemExit(0 if all(results) else 1)

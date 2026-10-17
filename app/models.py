@@ -17,6 +17,8 @@ class Profile:
     max_refs: int = 0       # dla edycji: limit obrazow referencyjnych
     tested: bool = True     # wygenerowal obraz w tym projekcie (16.10.2026); jakosc oceniona tylko wizualnie
     note: str = ""
+    pose_transfer: bool | None = None   # edycja: czy przenosi poze z 2. obrazu; None = nie sprawdzono renderem
+    pose_note: str = ""                 # powod, gdy pose_transfer=False (pokazywany w komunikacie bledu)
 
 
 PROFILES: dict[str, Profile] = {p.id: p for p in [
@@ -35,10 +37,16 @@ PROFILES: dict[str, Profile] = {p.id: p for p in [
             note="Szczegolowy opis z relacjami przestrzennymi."),
     # --- edycja z referencja (kanon) ---
     Profile("krea-identity-edit", "Krea 2 Identity Edit", "edit", "delta", max_refs=2, tested=True,
-            note="1-2 referencje (najpierw scena bazowa), instrukcja 1-4 zdan, bez promptu negatywnego."),
+            note="1-2 referencje (najpierw scena bazowa), instrukcja 1-4 zdan, bez promptu negatywnego.",
+            pose_transfer=False,
+            pose_note="test z 17.10.2026 (README, 'Poza z referencji'): nie przenosi pozy z drugiego obrazu w zadnej roli obrazu"),
     Profile("dark-beast-krea2-identity-edit", "Dark Beast Krea 2 Identity Edit", "edit", "delta", max_refs=2,
-            note="Wariant Krea Identity Edit; 1-2 referencje."),
-    Profile("qwen", "Qwen Image Edit 2511", "edit", "delta", max_refs=3, tested=True, note="Do 3 referencji."),
+            note="Wariant Krea Identity Edit; 1-2 referencje. Poza z referencji: render 17.10.2026 (n=1, kanon jako 1. obraz) "
+                 "przeniosl poze, ale z przeciekiem pancerza i koloru plaszcza ze zdjecia pozy; przy odwroconej kolejnosci "
+                 "obrazow poza nie przeszla.",
+            pose_transfer=True),
+    Profile("qwen", "Qwen Image Edit 2511", "edit", "delta", max_refs=3, tested=True, note="Do 3 referencji.",
+            pose_transfer=True),
     Profile("qwen-lightning", "Qwen Image Edit 2511 Lightning", "edit", "delta", max_refs=3, note="Do 3 referencji."),
 ]}
 

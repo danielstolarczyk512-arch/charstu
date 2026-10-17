@@ -103,10 +103,15 @@ def plan_pose(c: dict, shot: dict, pose_artifact_id: int, edit_model: str | None
     model = (edit_model or POSE_MODEL).strip()
     if not _MODEL_ID.match(model):
         raise PipelineError(f"Niepoprawny identyfikator modelu: {model[:40]!r}")
-    prof = models.get(model, "edit")
     known = models.PROFILES.get(model)
-    if (known and known.op != "edit") or "krea" in model or (prof.max_refs and prof.max_refs < 2):
-        raise PipelineError(f"Model {model} nie przenosi pozy z obrazu referencyjnego - uzyj modelu Qwen Image Edit ({POSE_MODEL}).")
+    if known and known.op != "edit":
+        raise PipelineError(f"{known.label} obsluguje tylko generowanie - poza z referencji wymaga modelu edycji ({POSE_MODEL}).")
+    prof = models.get(model, "edit")
+    if prof.max_refs < 2:   # kanon (twarz) + obraz pozy = 2 referencje
+        raise PipelineError(f"{prof.label} przyjmuje {prof.max_refs} referencji, a poza z referencji wymaga 2 (kanon + poza).")
+    if prof.pose_transfer is False:   # powod z profilu (wynik prawdziwego renderu), nie z nazwy modelu
+        raise PipelineError(f"{prof.label} nie przenosi pozy z obrazu referencyjnego: {prof.pose_note}. "
+                            f"Uzyj modelu Qwen Image Edit ({POSE_MODEL}).")
     return model, prompts.pose_prompt(c, shot), refs
 
 
