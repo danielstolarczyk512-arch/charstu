@@ -102,8 +102,8 @@ def match_faces(embs: list, ea, eb) -> dict:
     """Dopasowuje wykryte twarze do kanonow A i B i zwraca dwie liczby (cosine) albo None.
     Jedna twarz: tylko do blizszego kanonu (drugi kanon = None). Dwie lub wiecej: najlepsze przypisanie rozlaczne
     (kazda twarz najwyzej raz), liczy sie para o najwyzszej sumie podobienstw."""
-    def sim(x, y):
-        return None if x is None or y is None else float((x * y).sum())
+    def sim(x, y):   # iloczyn skalarny (embeddingi sa znormalizowane); dziala na numpy i na zwyklych listach
+        return None if x is None or y is None else float(sum(float(p) * float(q) for p, q in zip(x, y)))
     if not embs or (ea is None and eb is None):
         return {"a": None, "b": None, "faces": len(embs)}
     if len(embs) == 1:
