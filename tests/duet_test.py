@@ -147,6 +147,10 @@ with TestClient(app) as c:
     p_out = prompts.duet_prompt(A, B, {**shot, "outfit_b": "fully nude"}, 2)
     check("D5 strój pusty = jak w referencji; 'fully nude' bez 'wearing'", "Mira keeps the outfit from the first reference image" in p_out
           and "Kael is fully nude." in p_out and "wearing fully nude" not in p_out)
+    p_posed = prompts.duet_prompt(A, B, shot, 3, pose_ref=True)
+    check("D5b z obrazem ukladu: strój z karty slowami (przeciek ubran z obrazu pozy), bez zdania 'keeps the outfit'",
+          "Mira wears plain as in the first reference image, not the clothes of the people in the third reference image" in p_posed
+          and "keeps the outfit" not in p_posed)
     p_nopose = prompts.duet_prompt(A, B, shot, 2, pose_ref=False)
     check("D6 bez obrazu interakcji brak zdania o 3. obrazie", "third reference" not in p_nopose)
     same = prompts.duet_prompt({"name": "aa"}, {"name": "aa"}, shot, 2)

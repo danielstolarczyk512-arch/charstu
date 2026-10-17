@@ -140,9 +140,17 @@ def duet_prompt(c: dict, partner: dict, shot: dict, n_refs: int = 2, pose_ref: b
     if action:
         scene += f" {action[0].upper() + action[1:]}."
     wear = []
-    for name, ref, outfit in ((a, "first", outfit_a or shot.get("outfit")), (b, "second", outfit_b or shot.get("outfit_b"))):
+    with_pose = pose_ref and n_refs >= 3
+    for name, ref, outfit, card in ((a, "first", outfit_a or shot.get("outfit"), c), (b, "second", outfit_b or shot.get("outfit_b"), partner)):
         out = wearing(_clean(outfit))
-        wear.append(f"{name} is {out}." if out else f"{name} keeps the outfit from the {ref} reference image.")
+        if out:
+            wear.append(f"{name} is {out}.")
+        elif with_pose and _clean(card.get("outfit")):
+            # obraz ukladu cial przecieka ubraniem osob z obrazu (test 17.10.2026), wiec stroj z karty podajemy slowami
+            wear.append(f"{name} wears {_clean(card.get('outfit'))} as in the {ref} reference image, not the clothes of the "
+                        "people in the third reference image.")
+        else:
+            wear.append(f"{name} keeps the outfit from the {ref} reference image.")
     refs = [f"The first reference image shows {a}: use it only for {a}'s face and hairstyle"
             + (f" ({_who(c)})." if _who(c) else "."),
             f"The second reference image shows {b}: use it only for {b}'s face and hairstyle"

@@ -72,7 +72,7 @@ class ShotIn(BaseModel):
     link_next: bool = False
     note: str = ""
     interaction: str = ""       # Duet
-    outfit_b: str = ""          # Duet: strój partnera
+    outfit_b: str = ""          # Duet: stroj partnera
     idx: int | None = None
 
 

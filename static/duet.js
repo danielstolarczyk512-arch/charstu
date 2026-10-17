@@ -176,8 +176,8 @@ async function refresh(force) {
     d.append(el('div', { class: 'muted', style: 'padding:2px 4px', text: `#${a.id} · A ${fs(a.face_score)} / B ${fs(a.face_score_b)}${a.label ? ' · ' + a.label : ''}` }));
     const tools = el('div', { class: 'tools' });
     if (a.kind === 'image') {
-      tools.append(el('button', { class: 'alt', text: S.flfStart === a.id ? 'start ✓' : 'start', onclick: () => { S.flfStart = a.id; S.shot = null; lastSig = ''; refresh(true); } }),
-        el('button', { class: 'alt', text: S.flfEnd === a.id ? 'koniec ✓' : 'koniec', onclick: () => { S.flfEnd = a.id; lastSig = ''; refresh(true); } }),
+      tools.append(el('button', { class: 'alt', text: S.flfStart === a.id ? 'start (wybrany)' : 'start', onclick: () => { S.flfStart = a.id; S.shot = null; lastSig = ''; refresh(true); } }),
+        el('button', { class: 'alt', text: S.flfEnd === a.id ? 'koniec (wybrany)' : 'koniec', onclick: () => { S.flfEnd = a.id; lastSig = ''; refresh(true); } }),
         el('button', { class: 'alt', text: 'zmierz', onclick: async () => { try { await api(`/api/artifacts/${a.id}/measure`, { method: 'POST' }); refresh(true); } catch (x) { say(x.message, true); } } }));
     } else if (a.kind === 'video') {
       const cb = el('input', { type: 'checkbox' }); cb.checked = S.clips.includes(a.id);

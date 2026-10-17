@@ -54,7 +54,7 @@ def clean_shot(d: dict, base: dict | None = None) -> dict:
         "link_next": 1 if d.get("link_next", b.get("link_next")) else 0,
         "note": _text(d.get("note", b.get("note")), 300),
         "interaction": _text(d.get("interaction", b.get("interaction")), 600),   # Duet: opis interakcji pary (angielski)
-        "outfit_b": _text(d.get("outfit_b", b.get("outfit_b")), 300),            # Duet: strój partnera (puste = kanon)
+        "outfit_b": _text(d.get("outfit_b", b.get("outfit_b")), 300),            # Duet: stroj partnera (puste = kanon)
     }
     safe_texts(out["title"], out["action"], out["outfit"], out["dialogue"], out["note"], out["interaction"], out["outfit_b"])
     return out
@@ -267,7 +267,7 @@ def effective_shot(scene: dict, fs: dict, film: dict | None = None) -> dict:
     action = ". ".join(p.strip().rstrip(".") for p in parts if p and p.strip())
     out = {"az": fs["az"], "el": fs["el"], "dist": fs["dist"], "fov": fs["fov"], "fmt": fs["fmt"], "action": action,
            "outfit": fs.get("outfit") or ""}
-    if film and film.get("partner_id"):   # Duet: partner, interakcja (ujecie ma pierwszenstwo przed ogolna z filmu) i strój B
+    if film and film.get("partner_id"):   # Duet: partner, interakcja (ujecie ma pierwszenstwo przed ogolna z filmu) i stroj B
         out.update({"partner_id": film["partner_id"], "outfit_b": fs.get("outfit_b") or "",
                     "interaction": (fs.get("interaction") or film.get("interaction") or "")})
     return out

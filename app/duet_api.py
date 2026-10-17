@@ -27,8 +27,8 @@ class PairShotIn(BaseModel):
     fov: float = 35
     fmt: str = "16:9"
     action: str = ""
-    outfit: str = ""          # strój A (puste = jak w kanonie)
-    outfit_b: str = ""        # strój B (puste = jak w kanonie)
+    outfit: str = ""          # stroj A (puste = jak w kanonie)
+    outfit_b: str = ""        # stroj B (puste = jak w kanonie)
     interaction: str = ""     # opis interakcji po angielsku (idzie do promptu)
 
 
