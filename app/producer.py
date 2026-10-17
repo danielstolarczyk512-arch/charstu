@@ -77,7 +77,8 @@ def shot_row(fs_id: int) -> dict:
 def request_image(fs_id: int, count: int = 1) -> dict:
     film, scene, fs, c = _ctx(fs_id)
     row = shot_row(fs_id)
-    return pipeline.submit_image(row, c, film["image_model"], film["edit_model"], True, count, fs_id, "image")
+    return pipeline.submit_image(row, c, film["image_model"], film["edit_model"], True, count, fs_id, "image",
+                                 allow_spark=bool(film.get("allow_spark")))
 
 
 def request_clip(fs_id: int) -> dict:
@@ -98,7 +99,8 @@ def request_clip(fs_id: int) -> dict:
             except pipeline.PipelineError as e:   # np. rozne proporcje -> zwykly klip z obrazu
                 db.run("UPDATE film_shots SET note=? WHERE id=?", (f"start->koniec pominiety: {e}"[:300], fs_id))
                 end_id = None
-    return pipeline.submit_video(row, c, fs["image_artifact_id"], end_id, fs["duration"], fs_id, "clip")
+    return pipeline.submit_video(row, c, fs["image_artifact_id"], end_id, fs["duration"], fs_id, "clip",
+                                 allow_spark=bool(film.get("allow_spark")))
 
 
 def request_speech(fs_id: int) -> dict | None:

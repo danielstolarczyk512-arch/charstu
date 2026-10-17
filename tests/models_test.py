@@ -89,5 +89,11 @@ with TestClient(app) as c:
     job = c.get(f"/api/jobs?character_id={cid}").json()[0]
     check("C11 generate zapisuje wybrany model w zadaniu", job["model"] == "z-turbo" and j["kind"] == "image", job["model"])
 
+# --- D. rejestr rozszerzony o rodzaje i pokrycie planem (szczegoly: tests/models_plan_test.py) ---
+check("D1 profile maja kind, covered, category", all(p.kind and p.category and isinstance(p.covered, bool) for p in models.PROFILES.values()))
+check("D2 wpisy edycji nadal z limitem referencji (krea 2, qwen 3)",
+      models.PROFILES["dark-beast-krea2-identity-edit"].max_refs == 2 and models.PROFILES["qwen-lightning"].max_refs == 3)
+check("D3 katalog niesie rowniez wideo, klip start->koniec i asystenta", all(len(models.catalog()[k]) >= 1 for k in ("video", "flf", "llm")))
+
 print(f"\nWYNIK: {sum(results)}/{len(results)}")
 raise SystemExit(0 if all(results) else 1)

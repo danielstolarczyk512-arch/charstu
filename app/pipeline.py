@@ -7,6 +7,9 @@ from .camera import describe
 from .runner import new_idem_key
 
 runner = None  # ustawiane przez main.lifespan
+provider = None  # ustawiane przez main.lifespan (saldo Premium Spark przed wyslaniem)
+
+SPARK_WARNING = "Ten model jest poza planem Unlimited. Zadanie zużyje Premium Spark."
 
 ANGLE_ROLE = {"front view": "front", "three-quarter view": "three_quarter",
               "side profile view": "profile", "rear three-quarter view": "three_quarter", "back view": "back"}
@@ -17,6 +20,30 @@ class PipelineError(Exception):
     def __init__(self, message: str, status: int = 400):
         super().__init__(message)
         self.status = status
+
+
+def spark_balance() -> float | None:
+    """Saldo Premium Spark z GET /v1/account/balance (pole `net`; znaczenie pol NIE potwierdzone dokumentacja, odczyt 17.10.2026:
+    settled/credit/debit/net = 0 na koncie z planem). None = nieznane (mock, blad sieci)."""
+    if provider is None or not hasattr(provider, "_call"):
+        return None
+    try:
+        r = provider._call("GET", "/v1/account/balance", retries=1)
+        return float(r.json()["data"]["net"]) if r.status_code == 200 else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def check_spark(model: str | None, allow_spark: bool):
+    """Model poza planem zuzywa Premium Spark: wymaga jawnego potwierdzenia i salda, sprawdzane PRZED wyslaniem."""
+    if not model or models.covered(model):
+        return
+    if not allow_spark:
+        raise PipelineError(f"{SPARK_WARNING} Potwierdź zużycie (allow_spark) albo wybierz model z planu.", 409)
+    bal = spark_balance()
+    if bal is not None and bal <= 0:
+        raise PipelineError(f"{SPARK_WARNING} Saldo Premium Spark na koncie wynosi {bal:g} - zadanie nie ruszy. "
+                            "Dokup Spark albo wybierz model z planu.", 402)
 
 
 def select_refs(character_id: int, shot: dict) -> list[int]:
@@ -44,6 +71,8 @@ def plan_image(c: dict, shot: dict, image_model: str | None, edit_model: str | N
     if not _MODEL_ID.match(model):
         raise PipelineError(f"Niepoprawny identyfikator modelu: {model[:40]!r}")
     known = models.PROFILES.get(model)
+    if known and known.kind not in ("image", "edit"):
+        raise PipelineError(f"{known.label} nie jest modelem obrazu (rodzaj: {known.kind}).")
     if known and known.op != op:  # Sogni: model tylko-do-generowania nie przyjmuje edycji (i odwrotnie)
         raise PipelineError(f"{known.label} obsluguje tylko {'generowanie' if known.op == 'generate' else 'edycje'}; "
                             f"wybierz inny model dla operacji: {'edycja z kanonem' if refs else 'generowanie bez kanonu'}.")
@@ -116,14 +145,16 @@ def plan_pose(c: dict, shot: dict, pose_artifact_id: int, edit_model: str | None
 
 
 def submit_image(shot: dict, c: dict, image_model=None, edit_model=None, use_refs=True, count=1,
-                 film_shot_id=None, role=None, label=None, pose_artifact_id=None) -> dict:
+                 film_shot_id=None, role=None, label=None, pose_artifact_id=None, allow_spark=False) -> dict:
     if pose_artifact_id:
         model, prompt, refs = plan_pose(c, shot, pose_artifact_id, edit_model)
+        check_spark(model, allow_spark)
         params = {"prompt": prompt, "fmt": shot["fmt"], "ref_ids": refs, "ref_artifact_ids": [pose_artifact_id],
                   "label": label or "poza"}
         ids = [submit_job(shot["id"], "edit", model, params, film_shot_id, role) for _ in range(count)]
         return {"jobs": ids, "kind": "edit", "refs": refs, "pose": pose_artifact_id}
     kind, model, prompt, refs, _ = plan_image(c, shot, image_model, edit_model, use_refs)
+    check_spark(model, allow_spark)
     params = {"prompt": prompt, "fmt": shot["fmt"], "ref_ids": refs if kind == "edit" else []}
     if label:
         params["label"] = label
@@ -188,11 +219,21 @@ def submit_refine(c: dict, source_artifact_id: int, instruction: str, count: int
 
 
 def submit_video(shot: dict, c: dict, source_artifact_id: int | None, end_artifact_id: int | None = None,
-                 duration: int | None = None, film_shot_id=None, role=None) -> dict:
-    model = config.VIDEO_MODEL
+                 duration: int | None = None, film_shot_id=None, role=None, allow_spark=False,
+                 video_model: str | None = None) -> dict:
+    model = (video_model or "").strip() or config.VIDEO_MODEL
     if end_artifact_id:
         check_flf(source_artifact_id, end_artifact_id)
         model = config.FLF_MODEL
+    if not _MODEL_ID.match(model):
+        raise PipelineError(f"Niepoprawny identyfikator modelu: {model[:40]!r}")
+    known = models.PROFILES.get(model)
+    if known and known.kind not in ("video", "flf"):
+        raise PipelineError(f"{known.label} nie jest modelem wideo (rodzaj: {known.kind}).")
+    if known and source_artifact_id and not known.i2v:
+        raise PipelineError(f"{known.label} generuje tylko z tekstu - nie przyjmuje obrazu startowego (animate_photo). "
+                            "Wybierz inny model klipu.")
+    check_spark(model, allow_spark)
     params = {"prompt": prompts.video_prompt(c, shot), "fmt": shot["fmt"], "source_artifact_id": source_artifact_id,
               "end_artifact_id": end_artifact_id,
               "duration": duration or (config.FLF_DURATION if end_artifact_id else config.VIDEO_DURATION)}

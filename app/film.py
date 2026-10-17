@@ -93,6 +93,9 @@ def update_film(film_id: int, **f) -> dict:
     if f.get("auto_pick") is not None:
         sets.append("auto_pick=?")
         args.append(1 if f["auto_pick"] else 0)
+    if f.get("allow_spark") is not None:   # zgoda na zuzycie Premium Spark przy modelach poza planem
+        sets.append("allow_spark=?")
+        args.append(1 if f["allow_spark"] else 0)
     for k in ("image_model", "edit_model"):
         if k in f:
             sets.append(f"{k}=?")

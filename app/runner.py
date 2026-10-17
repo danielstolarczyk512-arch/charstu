@@ -7,7 +7,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import config, db
+from . import config, db, models
 from .providers.base import GenRequest, Provider
 
 log = logging.getLogger("runner")
@@ -64,7 +64,8 @@ class Runner:
         return GenRequest(
             kind=job["kind"], prompt=p["prompt"], fmt=p.get("fmt", "16:9"), model=job["model"] or None,
             refs=refs, source_image=src, end_image=end, voice=voice, duration=p.get("duration", config.VIDEO_DURATION),
-            idem_key=job["idem_key"], safe_filter=bool(job["safe_filter"]), resume_id=job["workflow_id"])
+            idem_key=job["idem_key"], safe_filter=bool(job["safe_filter"]), resume_id=job["workflow_id"],
+            billing_mode=job_billing(job))
 
     def _run(self, job_id: int):
         job = db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
@@ -99,6 +100,14 @@ class Runner:
             log.exception("job %s failed", job_id)
             db.run("UPDATE jobs SET status='failed', finished=?, error=? WHERE id=?",
                    (db.now(), f"{type(e).__name__}: {e}", job_id))
+
+
+def job_billing(job: dict) -> str:
+    """billing_mode zadania: model poza planem -> "tokens" (Premium Spark), inaczej wartosc z konfiguracji.
+    Glos (qwen3-tts-*) i zadania bez modelu ida wg konfiguracji (nie sa w rejestrze pod tymi nazwami)."""
+    if job["kind"] in ("speech", "music") or not job["model"]:
+        return config.SOGNI_BILLING_MODE
+    return models.billing_for(job["model"], config.SOGNI_BILLING_MODE)
 
 
 def canon_face_path(character_id: int) -> Path | None:

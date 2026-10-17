@@ -9,7 +9,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import config, db, films_api, models, pipeline, producer, prompts, skeleton
+import threading
+
+from . import catalog_sync, config, db, films_api, models, pipeline, producer, prompts, skeleton
 from .camera import describe
 from .providers.base import GenRequest
 from .providers.factory import make_provider
@@ -24,12 +26,23 @@ async def lifespan(_: FastAPI):
     state["provider"] = make_provider()
     state["runner"] = Runner(state["provider"])
     pipeline.runner = state["runner"]
+    pipeline.provider = state["provider"]
     producer.provider = state["provider"]
     state["runner"].resume_pending()
+    threading.Thread(target=_sync_catalog, daemon=True, name="catalog").start()
     state["producer"] = producer.Producer()
     state["producer"].start()
     yield
     state["producer"].stop()
+
+
+def _sync_catalog():
+    """Przy starcie: odswiez katalog modeli (gdy jest siec) i ostrzez w logu o domyslnych modelach, ktore zniknely."""
+    try:
+        catalog_sync.refresh(state["provider"])
+        catalog_sync.check_defaults()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 app = FastAPI(title="Character Studio", lifespan=lifespan)
@@ -65,6 +78,8 @@ class GenIn(BaseModel):
     edit_model: str | None = None
     use_refs: bool = True
     count: int = 1
+    allow_spark: bool = False            # zgoda na zuzycie Premium Spark (model poza planem)
+    video_model: str | None = None       # model klipu; puste = VIDEO_MODEL z .env
     source_artifact_id: int | None = None
     end_artifact_id: int | None = None   # klip start -> koniec (wymaga source_artifact_id)
     duration: int | None = None
@@ -300,7 +315,23 @@ def _plan_image(c: dict, shot: dict, image_model: str | None, edit_model: str | 
 
 @app.get("/api/models")
 def list_models():
-    return {**models.catalog(), "defaults": {"generate": config.IMAGE_MODEL, "edit": config.EDIT_MODEL}}
+    return {**catalog_sync.merged(),
+            "defaults": {"generate": config.IMAGE_MODEL, "edit": config.EDIT_MODEL, "video": config.VIDEO_MODEL,
+                         "flf": config.FLF_MODEL, "llm": config.LLM_MODEL},
+            "spark_warning": pipeline.SPARK_WARNING}
+
+
+@app.post("/api/models/refresh")
+def refresh_models():
+    """Przycisk 'Odswiez katalog': pobiera /v1/model-catalog i /v1/models do cache w data/."""
+    r = catalog_sync.refresh(state["provider"])
+    return {"refresh": r, **list_models()}
+
+
+@app.get("/api/account")
+def account():
+    """Saldo Premium Spark (przed wyslaniem zadania na modelu poza planem). None = nieznane (mock / blad)."""
+    return {"premium_spark": pipeline.spark_balance(), "spark_warning": pipeline.SPARK_WARNING}
 
 
 @app.post("/api/preview")
@@ -346,8 +377,10 @@ def generate(sid: int, g: GenIn):
     c = _character(shot["character_id"])
     try:
         if g.kind == "video":
-            return pipeline.submit_video(shot, c, g.source_artifact_id, g.end_artifact_id, g.duration)
-        return pipeline.submit_image(shot, c, g.image_model, g.edit_model, g.use_refs, count, pose_artifact_id=g.pose_artifact_id)
+            return pipeline.submit_video(shot, c, g.source_artifact_id, g.end_artifact_id, g.duration,
+                                         allow_spark=g.allow_spark, video_model=g.video_model)
+        return pipeline.submit_image(shot, c, g.image_model, g.edit_model, g.use_refs, count,
+                                     pose_artifact_id=g.pose_artifact_id, allow_spark=g.allow_spark)
     except pipeline.PipelineError as e:
         raise HTTPException(e.status, str(e))
 
@@ -362,7 +395,9 @@ def estimate(sid: int, g: GenIn):
         kind, prompt, model = "video", prompts.video_prompt(c, shot), None
     else:
         kind, model, prompt, _, _ = _plan_image(c, shot, g.image_model, g.edit_model, g.use_refs)
-    req = GenRequest(kind=kind, prompt=prompt, fmt=shot["fmt"], model=model, safe_filter=config.SAFE_CONTENT_FILTER)
+    bill_model = model or (g.video_model or config.VIDEO_MODEL)
+    req = GenRequest(kind=kind, prompt=prompt, fmt=shot["fmt"], model=model, safe_filter=config.SAFE_CONTENT_FILTER,
+                     billing_mode=models.billing_for(bill_model, config.SOGNI_BILLING_MODE))
     return state["provider"].estimate(req)
 
 

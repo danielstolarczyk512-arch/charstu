@@ -34,6 +34,7 @@ class FilmPatch(BaseModel):
     music_prompt: str | None = None
     budget_spark: float | None = None
     auto_pick: bool | None = None
+    allow_spark: bool | None = None
     image_model: str | None = None
     edit_model: str | None = None
 

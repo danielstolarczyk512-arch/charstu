@@ -24,6 +24,7 @@ class GenRequest:
     idem_key: str = ""
     safe_filter: bool = True
     resume_id: str | None = None
+    billing_mode: str | None = None   # per zadanie: "tokens" dla modelu poza planem; None = z konfiguracji
 
 
 @dataclass

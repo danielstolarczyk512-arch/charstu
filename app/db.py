@@ -52,7 +52,8 @@ with _lock:
                           ("characters", "voice", "TEXT"), ("artifacts", "label", "TEXT"),
                           ("jobs", "film_shot_id", "INTEGER"), ("jobs", "role", "TEXT"),
                           ("films", "assemble_state", "TEXT"), ("films", "srt_path", "TEXT"),
-                          ("film_shots", "no_flf", "INTEGER DEFAULT 0")):
+                          ("film_shots", "no_flf", "INTEGER DEFAULT 0"),
+                          ("films", "allow_spark", "INTEGER DEFAULT 0")):
         try:  # migracje: kolumny dodane po pierwszej wersji bazy
             _conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {typ}")
         except sqlite3.OperationalError:

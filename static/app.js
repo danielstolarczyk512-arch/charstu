@@ -4,6 +4,8 @@ const rad = (x) => x * Math.PI / 180;
 const dark = matchMedia('(prefers-color-scheme: dark)').matches;
 const S = { az: 40, el: 5, di: 4, fv: 35, ea: -35, ee: 22, fmt: '16:9', char: null, shot: null };
 let CFG = {};
+const P = {};   // listy modeli (static/models.js): gen, edit, vid
+const sparkOk = (...ps) => ps.every((p) => p && (p.entry().covered || p.spark()));
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
@@ -15,7 +17,7 @@ const post = (p, body) => api(p, { method: 'POST', headers: { 'Content-Type': 'a
 const say = (t, bad) => { $('msg').textContent = t; $('msg').style.color = bad ? 'var(--bad)' : ''; };
 const shotBody = () => ({ character_id: S.char, az: S.az, el: S.el, dist: S.di, fov: S.fv, fmt: S.fmt,
   action: $('action').value, outfit: $('outfit').value,
-  image_model: $('mGen').value.trim() || null, edit_model: $('mEdit').value.trim() || null, use_refs: $('useRefs').checked });
+  image_model: P.gen ? P.gen.get() : null, edit_model: P.edit ? P.edit.get() : null, use_refs: $('useRefs').checked });
 
 /* ---------- scena 3D ---------- */
 const cv = $('cv'), wrap = $('wrap'), frame = $('frame'), tag = $('tag');
@@ -405,7 +407,8 @@ async function generate(kind, sourceId, endId) {
     const sid = await ensureShot();
     const r = await post(`/api/shots/${sid}/generate`, { kind, count: endId ? 1 : +$('count').value,
       source_artifact_id: sourceId || null, end_artifact_id: endId || null,
-      image_model: $('mGen').value.trim() || null, edit_model: $('mEdit').value.trim() || null, use_refs: $('useRefs').checked,
+      image_model: P.gen.get() || null, edit_model: P.edit.get() || null, video_model: P.vid.get() || null, use_refs: $('useRefs').checked,
+      allow_spark: kind === 'video' ? sparkOk(P.vid) : sparkOk(P.gen, P.edit),
       pose_artifact_id: kind === 'image' && $('poseSel').value ? +$('poseSel').value : null });
     say(`Zlecono ${r.jobs.length} zadań (${r.kind}${r.refs.length ? ', ref: ' + r.refs.length : ', bez referencji'}).`); refresh();
   } catch (err) { say(err.message, true); }
@@ -478,18 +481,12 @@ $('aiGo').onclick = async () => {
 
 /* ---------- wybor modelu ---------- */
 async function initModels() {
-  const m = await api('/api/models');
-  const opt = (p) => { const o = document.createElement('option'); o.value = p.id;
-    o.label = `${p.label}${p.tested ? ' (sprawdzony)' : ''}`; return o; };
-  m.generate.forEach((p) => $('dlGen').appendChild(opt(p)));
-  m.edit.forEach((p) => $('dlEdit').appendChild(opt(p)));
-  const load = (k, d) => { try { return localStorage.getItem(k) || d; } catch (e) { return d; } };
-  $('mGen').value = load('mGen', m.defaults.generate); $('mEdit').value = load('mEdit', m.defaults.edit);
+  P.gen = await Models.picker($('mGen'), 'image', { key: 'mGen', onChange: changed });
+  P.edit = await Models.picker($('mEdit'), 'edit', { key: 'mEdit', onChange: changed });
+  P.vid = await Models.picker($('mVid'), 'video', { key: 'mVid', onChange: changed });
+  $('mRefresh').onclick = () => Models.refreshAll($('mRefresh'), $('mCat'));
   try { $('useRefs').checked = localStorage.getItem('useRefs') !== '0'; } catch (e) { /* brak localStorage */ }
-  const save = () => { try { localStorage.setItem('mGen', $('mGen').value); localStorage.setItem('mEdit', $('mEdit').value);
-    localStorage.setItem('useRefs', $('useRefs').checked ? '1' : '0'); } catch (e) { /* ignoruj */ } changed(); };
-  ['mGen', 'mEdit'].forEach((i) => $(i).addEventListener('change', save));
-  $('useRefs').addEventListener('change', save);
+  $('useRefs').addEventListener('change', () => { try { localStorage.setItem('useRefs', $('useRefs').checked ? '1' : '0'); } catch (e) { /* ignoruj */ } changed(); });
 }
 
 /* ---------- start ---------- */

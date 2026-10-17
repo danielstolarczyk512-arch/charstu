@@ -114,10 +114,11 @@
     <textarea id="action" rows="2" placeholder="Co robi postać? (np. stoi na dachu, patrzy w dal)"></textarea>
     <input id="outfit" placeholder="Strój w tym ujęciu (puste = ten sam co w kanonie)" style="width:100%;margin-bottom:8px">
     <div class="box" style="margin-bottom:8px">
-      <div class="row" style="grid-template-columns:150px minmax(0,1fr)"><span>Model obrazu (bez kanonu)</span><input id="mGen" list="dlGen" placeholder="id modelu"></div>
-      <div class="row" style="grid-template-columns:150px minmax(0,1fr)"><span>Model edycji (z kanonem)</span><input id="mEdit" list="dlEdit" placeholder="id modelu"></div>
+      <div class="row" style="grid-template-columns:150px minmax(0,1fr)"><span>Model obrazu (bez kanonu)</span><select id="mGen"></select></div>
+      <div class="row" style="grid-template-columns:150px minmax(0,1fr)"><span>Model edycji (z kanonem)</span><select id="mEdit"></select></div>
+      <div class="row" style="grid-template-columns:150px minmax(0,1fr)"><span>Model klipu (z obrazu)</span><select id="mVid"></select></div>
       <label class="check" style="margin:4px 0"><input type="checkbox" id="useRefs" checked> Użyj kanonu jako referencji (odznacz = sam opis, tożsamość z opisu)</label>
-      <datalist id="dlGen"></datalist><datalist id="dlEdit"></datalist>
+      <div class="actions" style="margin:4px 0"><button id="mRefresh" class="alt" title="Pobiera katalog modeli z API Sogni (GET /v1/model-catalog) do pliku w data/">Odśwież katalog</button><span id="mCat" class="muted"></span></div>
       <div id="mNote" class="muted"></div>
     </div>
     <div class="box"><div id="camPl" class="muted"></div><pre id="prompt"></pre></div>
@@ -157,6 +158,7 @@
   </section>
 </main>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="/static/models.js"></script>
 <script src="/static/app.js"></script>
 <script src="/static/film.js"></script>
 </body>

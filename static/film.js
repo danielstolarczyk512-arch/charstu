@@ -153,6 +153,11 @@ function render(t) {
       h('span', { id: 'fmMsg', class: 'muted' })),
     h('div', { class: 'fm-row' }, txt(f.title, (v) => PF({ title: v }), 'Tytuł'), txt(f.logline, (v) => PF({ logline: v }), 'Logline (jedno zdanie)')),
     txt(f.synopsis, (v) => PF({ synopsis: v }), 'Streszczenie fabuły (po polsku)', 'textarea'),
+    h('div', { class: 'box', id: 'fmModels' },
+      h('div', { class: 'muted', text: 'Modele filmu (puste = domyślne z .env). Model poza planem zużywa Premium Spark i wymaga zgody.' }),
+      h('div', { class: 'fm-row' }, field('model obrazu (bez kanonu)', h('select', { id: 'fmMGen' })), field('model edycji (z kanonem)', h('select', { id: 'fmMEdit' }))),
+      h('label', { class: 'muted', title: 'Zgoda na zużycie Premium Spark przy modelach spoza planu Unlimited' },
+        h('input', { type: 'checkbox', checked: !!f.allow_spark, onchange: (ev) => PF({ allow_spark: ev.target.checked }) }), ' zgoda na zużycie Premium Spark (modele poza planem)')),
     h('div', { class: 'fm-row' }, txt(f.music_prompt, (v) => PF({ music_prompt: v }), 'Podkład muzyczny (angielski: nastrój, instrumenty, BPM, tonacja)'),
       field('budżet (Spark)', num(f.budget_spark, 0, 100000, 10, (v) => PF({ budget_spark: v }), 80)),
       h('label', { class: 'muted', title: 'Producent sam wybiera najlepszy obraz spośród kandydatów' },
@@ -204,6 +209,9 @@ function render(t) {
     h('datalist', { id: 'fmOutfits' }, OUT.map((o) => h('option', { value: o.description, label: o.name }))),
     ...t.scenes.map(sceneCard),
     h('button', { class: 'alt', onclick: () => act(() => post(`/api/films/${f.id}/scenes`, { title: 'Nowa scena' })) }, '+ scena'));
+  const mp = (id, kind, cur) => Models.picker($(id), kind, { transient: true, noStore: true, initial: cur || undefined,
+    onChange: (pk) => { PF({ [kind === 'edit' ? 'edit_model' : 'image_model']: pk.get() }); } }).catch(() => {});
+  mp('fmMGen', 'image', f.image_model); mp('fmMEdit', 'edit', f.edit_model);
 }
 
 function summary(asm) {

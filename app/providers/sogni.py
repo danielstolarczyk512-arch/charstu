@@ -149,7 +149,7 @@ class SogniProvider(Provider):
                 step = {"id": "s1", "toolName": "generate_video", "arguments": args}
         body = {
             "input": {"title": f"studio-{req.kind}", "steps": [step]},
-            "billing_mode": config.SOGNI_BILLING_MODE,
+            "billing_mode": req.billing_mode or config.SOGNI_BILLING_MODE,
             "app_source": "character-studio",
             "safe_content_filter": req.safe_filter,
             "max_estimated_capacity_units": config.SOGNI_MAX_CAPACITY_UNITS,
