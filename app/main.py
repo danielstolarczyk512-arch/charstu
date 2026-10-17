@@ -658,7 +658,7 @@ app.mount("/files", StaticFiles(directory=config.DATA), name="files")
 
 @app.get("/")
 def index():
-    return FileResponse(STATIC / "index.html")
+    return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
 
 
 class NoCacheStatic(StaticFiles):

@@ -32,12 +32,17 @@ const msg = (t, bad) => { const m = $('fmMsg'); if (m) { m.textContent = t; m.st
 /* ---------- nawigacja ---------- */
 function show(view) {
   const film = view === 'film';
-  $('filmView').hidden = !film; $('studioView').hidden = film;
-  $('navFilm').classList.toggle('on', film); $('navStudio').classList.toggle('on', !film);
+  const duet = view === 'duet';
+  $('filmView').hidden = !film; $('studioView').hidden = film || duet; $('duetView').hidden = !duet;
+  $('navFilm').classList.toggle('on', film); $('navStudio').classList.toggle('on', !film && !duet);
+  $('navDuet').classList.toggle('on', duet);
   if (film) { loadChars(); loadList(); }
+  if (duet && window.Duet) window.Duet.open();
 }
+window.showView = show;
 $('navStudio').onclick = () => show('studio');
 $('navFilm').onclick = () => show('film');
+$('navDuet').onclick = () => show('duet');
 
 async function loadChars() {
   const cs = await api('/api/characters');

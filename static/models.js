@@ -64,7 +64,7 @@ async function picker(sel, kind, opts) {
   };
 
   function fill() {
-    const cur = sel.value || opts.initial || (opts.noStore ? '' : store.get(key, '')) || (DATA.defaults || {})[DEFAULT_KEY[kind]] || '';
+    const cur = sel.value || opts.initial || (opts.noStore ? '' : store.get(key, '')) || opts.defaultId || (DATA.defaults || {})[DEFAULT_KEY[kind]] || '';
     sel.innerHTML = '';
     let grp = null, grpName = null;
     (DATA[kind] || []).forEach((e) => {

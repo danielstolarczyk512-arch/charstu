@@ -62,4 +62,10 @@ details{margin:8px 0}
 .fm-final{width:100%;max-width:760px;border-radius:8px;margin-top:8px}
 #fmMain .box{margin:10px 0}
 
+#duetView{display:grid;grid-template-columns:290px minmax(0,1fr) 340px;gap:12px;padding:12px}
+@media (max-width:1000px){#duetView{grid-template-columns:1fr}}
+.libwrap{display:flex;flex-wrap:wrap;gap:4px}
+.libbtn{padding:3px 10px;font-size:12px;border:1px solid var(--line);border-radius:8px;background:transparent;cursor:pointer}
+.libbtn.on{background:var(--accbg);border-color:var(--acc);color:var(--acc)}
+.libbtn .dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--acc);margin-left:4px}
 .attrs{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0}.attrs select{flex:1 1 30%;min-width:90px;font-size:12px}

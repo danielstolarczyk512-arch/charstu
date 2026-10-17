@@ -9,9 +9,96 @@
 <body>
 <header>
   <strong>Character Studio</strong>
-  <nav class="nav"><button id="navStudio" class="pill on">Studio</button><button id="navFilm" class="pill">Film</button></nav>
+  <nav class="nav"><button id="navStudio" class="pill on">Studio</button><button id="navFilm" class="pill">Film</button><button id="navDuet" class="pill">Duet</button></nav>
   <span id="status" class="muted"></span>
 </header>
+<div id="duetView" hidden>
+  <aside class="col" id="duLeft">
+    <h2>Postać A</h2>
+    <select id="duA"></select>
+    <div id="duACov" class="muted"></div>
+    <details><summary>Nowa postać A</summary>
+      <form id="duNewA">
+        <input name="name" placeholder="Imię" required>
+        <input name="archetype" placeholder="Archetyp (np. łowczyni)">
+        <input name="traits" placeholder="Cechy (włosy, oczy, budowa)">
+        <input name="outfit" placeholder="Strój">
+        <input name="style" placeholder="Styl (np. semi-realistic, cinematic)">
+        <label class="check"><input type="checkbox" name="adult_fictional"> Postać jest fikcyjna i dorosła (18+), nie jest realną osobą</label>
+        <button type="submit">Utwórz postać A</button>
+      </form>
+    </details>
+    <h2 style="margin-top:12px">Postać B (partner)</h2>
+    <select id="duB"></select>
+    <div id="duBCov" class="muted"></div>
+    <details><summary>Nowy partner B</summary>
+      <form id="duNewB">
+        <input name="name" placeholder="Imię" required>
+        <input name="archetype" placeholder="Archetyp">
+        <input name="traits" placeholder="Cechy (włosy, oczy, budowa)">
+        <input name="outfit" placeholder="Strój">
+        <input name="style" placeholder="Styl">
+        <label class="check"><input type="checkbox" name="adult_fictional"> Postać jest fikcyjna i dorosła (18+), nie jest realną osobą</label>
+        <button type="submit">Utwórz partnera B</button>
+      </form>
+    </details>
+    <details><summary>Kanon partnera B (twarz + sylwetka)</summary>
+      <div class="muted" style="font-size:12px">Minimum to twarz. Wgraj obraz (wyłącznie wygenerowany lub rysunek, nie zdjęcie prawdziwej osoby) albo wygeneruj twarz i sylwetkę z opisu karty (2 ujęcia). Wyniki zatwierdzasz niżej.</div>
+      <form id="duCanonUp">
+        <select name="role"><option value="face">twarz</option><option value="body">sylwetka</option></select>
+        <input type="file" name="file" accept="image/*" required>
+        <button type="submit" class="alt">Wgraj jako kanon B</button>
+      </form>
+      <button id="duCanonGen" class="alt" title="Brakujące obrazy minimalnego kanonu: twarz i sylwetka (2 ujęcia, nie 8 jak w arkuszu)">Wygeneruj twarz i sylwetkę B</button>
+      <div id="duCanonCands" class="thumbs" style="margin-top:8px"></div>
+    </details>
+  </aside>
+  <section class="col" id="duMid">
+    <h2>Ujęcie pary</h2>
+    <div class="muted">Interakcja z biblioteki (obraz pozy, jeśli ma, trafia jako 3. referencja):</div>
+    <div id="duLib" class="libwrap" style="margin:6px 0"></div>
+    <details><summary>Dodaj własną pozycję do biblioteki</summary>
+      <form id="duLibForm">
+        <input name="name" placeholder="Nazwa pozycji" required>
+        <input name="description" placeholder="Krótki opis po angielsku (ułożenie ciał)" required>
+        <input type="file" name="file" accept="image/*">
+        <button type="submit" class="alt">Dodaj pozycję</button>
+      </form>
+    </details>
+    <textarea id="duInter" rows="3" placeholder="Opis interakcji po angielsku, z imionami (kto co robi; trafia do promptu)"></textarea>
+    <textarea id="duAction" rows="2" placeholder="Miejsce i otoczenie (angielski, opcjonalnie)"></textarea>
+    <div class="fm-row"><input id="duOutA" placeholder="Strój A (puste = jak w kanonie)"><input id="duOutB" placeholder="Strój B (puste = jak w kanonie)"></div>
+    <div class="row"><span>Kąt</span><input type="range" id="duAz" min="-180" max="180" value="30"><span id="duAzv"></span></div>
+    <div class="row"><span>Wysokość</span><input type="range" id="duEl" min="-60" max="85" value="5"><span id="duElv"></span></div>
+    <div class="row"><span>Odległość</span><input type="range" id="duDi" min="12" max="80" value="35"><span id="duDiv"></span></div>
+    <div class="pills"><button class="pill on" data-dufmt="16:9">16:9</button><button class="pill" data-dufmt="9:16">9:16</button></div>
+    <div class="box" style="margin:8px 0">
+      <div class="row" style="grid-template-columns:150px minmax(0,1fr)"><span>Model edycji (para)</span><select id="duEdit"></select></div>
+      <div class="row" style="grid-template-columns:150px minmax(0,1fr)"><span>Model klipu</span><select id="duVid"></select></div>
+      <div class="actions" style="margin:4px 0"><button id="duRefresh" class="alt">Odśwież katalog</button><span id="duCat" class="muted"></span></div>
+      <div id="duWarn" class="muted"></div>
+    </div>
+    <div class="box"><div class="muted">Referencje: <span id="duRefs"></span></div><pre id="duPrompt"></pre></div>
+    <div class="actions">
+      <button id="duGen">Generuj</button>
+      <label class="muted">warianty <select id="duCount"><option>2</option><option>3</option><option>4</option></select></label>
+    </div>
+    <div id="duMsg" class="muted"></div>
+  </section>
+  <section class="col" id="duRight">
+    <h2>Zadania</h2>
+    <div id="duJobs"></div>
+    <h2>Wyniki pary</h2>
+    <div class="actions" style="margin:0 0 8px;flex-wrap:wrap">
+      <button id="duClip" class="alt" title="Klip z zaznaczonego obrazu (i2v), prompt w liczbie mnogiej">Klip z tego ujęcia</button>
+      <button id="duFlf" class="alt" title="Klip między obrazem start i koniec (MiniMax H3, te same proporcje)">Klip start→koniec</button>
+      <button id="duStitch" class="alt" title="Sklejka zaznaczonych klipów (stitch.py)">Sklej zaznaczone klipy</button>
+      <label class="muted">przenikanie (s) <input id="duFade" type="number" min="0" max="2" step="0.1" value="0" style="width:64px"></label>
+    </div>
+    <div class="muted" style="font-size:12px">Liczby przy obrazie: A / B = podobieństwo twarzy do kanonu A i B. Miara orientacyjna, bezużyteczna przy odwróconej twarzy; nie rozstrzyga, czy osoby się nie zlały.</div>
+    <div id="duGallery" class="gallery"></div>
+  </section>
+</div>
 <div id="filmView" hidden>
   <aside class="col fm-side">
     <h2>Filmy</h2>
@@ -161,5 +248,6 @@
 <script src="/static/models.js"></script>
 <script src="/static/app.js"></script>
 <script src="/static/film.js"></script>
+<script src="/static/duet.js"></script>
 </body>
 </html>
