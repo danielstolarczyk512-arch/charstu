@@ -30,6 +30,7 @@ class PairShotIn(BaseModel):
     outfit: str = ""          # stroj A (puste = jak w kanonie)
     outfit_b: str = ""        # stroj B (puste = jak w kanonie)
     interaction: str = ""     # opis interakcji po angielsku (idzie do promptu)
+    ref_slot_b: str = "partner_face"   # 'partner_face' (twarz B) albo 'lead_body' (naga sylwetka A zamiast twarzy B)
 
 
 class PlanIn(PairShotIn):
@@ -46,7 +47,13 @@ class GenIn(BaseModel):
     interaction: str | None = None         # nadpisuje opis zapisany w ujeciu
     outfit: str | None = None
     outfit_b: str | None = None
+    ref_slot_b: str | None = None
     allow_spark: bool = False
+
+
+class AnatomyIn(BaseModel):
+    description: str | None = None
+    anatomy: str | None = None
 
 
 class VideoIn(BaseModel):
@@ -80,14 +87,21 @@ def list_interactions():
 
 
 @router.post("/api/duet/interactions")
-async def add_interaction(name: str = Form(""), description: str = Form(""), file: UploadFile | None = File(None)):
+async def add_interaction(name: str = Form(""), description: str = Form(""), anatomy: str = Form(""),
+                          file: UploadFile | None = File(None)):
     """Wlasna pozycja biblioteki: nazwa, opis po angielsku i opcjonalny obraz ukladu cial (nie wgrywaj zdjec prawdziwych osob)."""
     data = None
     if file is not None and file.filename:
         if Path(file.filename).suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
             raise HTTPException(400, "Dozwolone: png, jpg, webp")
         data = await file.read()
-    return _wrap(duet.add_interaction, name, description, data)
+    return _wrap(duet.add_interaction, name, description, data, anatomy)
+
+
+@router.patch("/api/duet/interactions/{ref}")
+def patch_interaction(ref: str, p: AnatomyIn):
+    """Edycja opisu i frazy anatomii pozycji (pole 'Anatomia pozycji' w oknie Duet)."""
+    return _wrap(duet.update_interaction, ref, p.description, p.anatomy)
 
 
 @router.post("/api/duet/interactions/{ref}/image")
@@ -119,16 +133,22 @@ def _shot_and_pose(g: PlanIn):
     return a, b, shot, _wrap(duet.resolve_pose, g.interaction_id, g.pose_artifact_id)
 
 
+def _anatomy_of(interaction_id) -> str:
+    """Fraza anatomii wybranej pozycji z biblioteki (pusta, gdy brak pozycji albo frazy)."""
+    return (_wrap(duet.get_interaction, interaction_id)["anatomy"] or "") if interaction_id else ""
+
+
 @router.post("/api/duet/plan")
 def plan(g: PlanIn):
     """Podglad bez zlecania: prompt, referencje (kolejnosc A, B, uklad), ostrzezenia o modelu i pokrycie planem."""
     a, b, shot, pose = _shot_and_pose(g)
     _wrap(duet.safe_texts, g.action, g.outfit, g.outfit_b, g.interaction)
+    anatomy = _anatomy_of(g.interaction_id)
     model, prompt, refs, prof, warnings = _wrap(pipeline.plan_image_duet, a, b, shot, g.edit_model, pose, g.interaction,
-                                                g.outfit, g.outfit_b)
+                                                g.outfit, g.outfit_b, g.ref_slot_b, anatomy)
     return {"model": model, "prompt": prompt, "refs": refs["ref_ids"], "pose_used": refs["pose_used"], "warnings": warnings,
-            "max_refs": prof.max_refs, "covered": models.covered(model),
-            "video_prompt": prompts.video_prompt(a, shot, b, g.interaction, g.outfit, g.outfit_b)}
+            "max_refs": prof.max_refs, "covered": models.covered(model), "slot_b": refs["slot_b"],
+            "video_prompt": prompts.video_prompt(a, shot, b, g.interaction, g.outfit, g.outfit_b, anatomy)}
 
 
 @router.post("/api/duet/shots")
@@ -157,8 +177,9 @@ def generate(sid: int, g: GenIn):
     _wrap(duet.safe_texts, interaction, outfit_a, outfit_b, shot["action"] or "")
     pose = _wrap(duet.resolve_pose, g.interaction_id, g.pose_artifact_id)
     label = "duet" + (f":{g.interaction_id}" if g.interaction_id else "")
+    slot_b = g.ref_slot_b or shot["ref_slot_b"] or "partner_face"
     return _wrap(pipeline.submit_image_duet, shot, a, b, g.edit_model, count, pose, interaction, outfit_a, outfit_b,
-                 g.allow_spark, label)
+                 g.allow_spark, label, None, None, slot_b, _anatomy_of(g.interaction_id))
 
 
 @router.post("/api/duet/shots/{sid}/video")

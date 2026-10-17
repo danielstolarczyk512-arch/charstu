@@ -125,8 +125,15 @@ def _who(c: dict) -> str:
     return f"{who} with {traits}" if who and traits else (who or traits)
 
 
+def frame_guard() -> str:
+    """Blok pozytywny o liczbie osob i rozdzielnosci cial (program nie wysyla promptu negatywnego, wiec 'bez trzeciej osoby'
+    trzeba napisac wprost). Uzywany tylko w promptach pary (obraz i klip); dla jednej postaci nie wystepuje."""
+    return ("There are exactly two people in the frame and nobody else. Two pairs of legs. "
+            "Their bodies are separate and clearly distinct, not merged.")
+
+
 def duet_prompt(c: dict, partner: dict, shot: dict, n_refs: int = 2, pose_ref: bool = False, interaction: str = "",
-                outfit_a: str = "", outfit_b: str = "") -> str:
+                outfit_a: str = "", outfit_b: str = "", slot_b: str = "partner_face", anatomy: str = "") -> str:
     """Prompt edycji dla pary (Qwen/Krea edit): jawnie wiaze role. Kolejnosc referencji jak w sogni.py: 1. obraz = A (twarz),
     2. = B (twarz), opcjonalnie 3. = tylko ulozenie cial. Partner nigdy nie jest 'the character'; bez zaimkow plci.
     Puste stroje = jak w referencjach. Jedyne zdanie o liczbie osob: two_people() (B2)."""
@@ -137,12 +144,22 @@ def duet_prompt(c: dict, partner: dict, shot: dict, n_refs: int = 2, pose_ref: b
     scene = f"Show {a} and {b} together, {cam}."
     if inter:
         scene += f" {inter[0].upper() + inter[1:]}."
+    anat = _clean(anatomy)
+    if anat:   # stala fraza pozycji z biblioteki, po opisie interakcji i niezalezna od tego, co wpisze uzytkownik
+        scene += f" {anat[0].upper() + anat[1:]}."
     if action:
         scene += f" {action[0].upper() + action[1:]}."
     wear = []
     with_pose = pose_ref and n_refs >= 3
+    lead_body = slot_b == "lead_body"   # 2. referencja = sylwetka A; B bez referencji, opisany slowami
     for name, ref, outfit, card in ((a, "first", outfit_a or shot.get("outfit"), c), (b, "second", outfit_b or shot.get("outfit_b"), partner)):
         out = wearing(_clean(outfit))
+        if lead_body and name == b:
+            if out:
+                wear.append(f"{name} is {out}.")
+            elif _clean(card.get("outfit")):
+                wear.append(f"{name} wears {_clean(card.get('outfit'))}.")
+            continue
         if out:
             wear.append(f"{name} is {out}.")
         elif with_pose and _clean(card.get("outfit")):
@@ -152,13 +169,17 @@ def duet_prompt(c: dict, partner: dict, shot: dict, n_refs: int = 2, pose_ref: b
         else:
             wear.append(f"{name} keeps the outfit from the {ref} reference image.")
     refs = [f"The first reference image shows {a}: use it only for {a}'s face and hairstyle"
-            + (f" ({_who(c)})." if _who(c) else "."),
-            f"The second reference image shows {b}: use it only for {b}'s face and hairstyle"
-            + (f" ({_who(partner)})." if _who(partner) else ".")]
+            + (f" ({_who(c)})." if _who(c) else ".")]
+    if lead_body:
+        refs.append(f"The second reference image shows {a}'s body: use it only for {a}'s body shape and skin.")
+        refs.append(f"{b} has no reference image; {b} is {_who(partner) or 'an adult'} and must look different from {a}.")
+    else:
+        refs.append(f"The second reference image shows {b}: use it only for {b}'s face and hairstyle"
+                    + (f" ({_who(partner)})." if _who(partner) else "."))
     if pose_ref and n_refs >= 3:
         refs.append("The third reference image shows only the arrangement of the two bodies: copy only that body arrangement and "
                     "ignore the faces, hair, skin and clothes of the people in it.")
-    return " ".join([scene, two_people(a, b), *wear, *refs])
+    return " ".join([scene, two_people(a, b), frame_guard(), *wear, *refs])
 
 
 def _unclothed(*outfits: str) -> bool:
@@ -167,7 +188,7 @@ def _unclothed(*outfits: str) -> bool:
 
 
 def video_prompt(c: dict, shot: dict, partner: dict | None = None, interaction: str = "", outfit_a: str = "",
-                 outfit_b: str = "") -> str:
+                 outfit_b: str = "", anatomy: str = "") -> str:
     """LTX: jeden plynny akapit w czasie terazniejszym. Z `partner`: liczba mnoga, obie osoby nazwane; niezmienny strój jest
     wymuszany tylko, gdy zaden ze strojow nie opisuje braku ubrania (_UNCLOTHED na polach stroju A i B) i interakcja nie
     opisuje zmiany ubrania (_OUTFIT_CHANGE). Stroje domyslnie z ujecia (pola outfit / outfit_b)."""
@@ -176,11 +197,11 @@ def video_prompt(c: dict, shot: dict, partner: dict | None = None, interaction: 
         a, b = _roles(c, partner)
         inter = _clean(interaction or shot.get("interaction"))
         action = _clean(shot.get("action"))
-        doing = " ".join(f"{t[0].upper() + t[1:]}." for t in (inter, action) if t) or f"{a} and {b} stand close together and breathe."
+        doing = " ".join(f"{t[0].upper() + t[1:]}." for t in (inter, _clean(anatomy), action) if t) or f"{a} and {b} stand close together and breathe."
         nude = _unclothed(outfit_a or shot.get("outfit"), outfit_b or shot.get("outfit_b"))
         keep = "faces and hairstyles" if (nude or _OUTFIT_CHANGE.search(inter)) else "faces, hairstyles and outfits"
         return (f"A {cam} of {a} and {b}. {doing} The camera moves smoothly and steadily while both people keep their own "
-                f"{keep} throughout the entire clip. Both people stay clearly visible and distinct.")
+                f"{keep} throughout the entire clip. Both people stay clearly visible and distinct. {frame_guard()}")
     action = (shot.get("action") or "stands still and breathes").strip()
     return (
         f"A {cam} of {character_block(c, shot.get('outfit') or '')}. The character {action}. "

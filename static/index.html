@@ -17,6 +17,10 @@
     <h2>Postać A</h2>
     <select id="duA"></select>
     <div id="duACov" class="muted"></div>
+    <details><summary>Naga sylwetka A w kanonie</summary>
+      <div class="muted" style="font-size:12px">Rola body_nude: obraz całej sylwetki bez ubrania (wyłącznie wygenerowany lub rysunek). Używana, gdy przełącznik "Twarz partnera w kadrze" jest wyłączony.</div>
+      <form id="duNudeA"><input type="file" name="file" accept="image/*" required><button type="submit" class="alt">Dodaj nagą sylwetkę do kanonu</button></form>
+    </details>
     <details><summary>Nowa postać A</summary>
       <form id="duNewA">
         <input name="name" placeholder="Imię" required>
@@ -31,6 +35,9 @@
     <h2 style="margin-top:12px">Postać B (partner)</h2>
     <select id="duB"></select>
     <div id="duBCov" class="muted"></div>
+    <details><summary>Naga sylwetka B w kanonie</summary>
+      <form id="duNudeB"><input type="file" name="file" accept="image/*" required><button type="submit" class="alt">Dodaj nagą sylwetkę do kanonu</button></form>
+    </details>
     <details><summary>Nowy partner B</summary>
       <form id="duNewB">
         <input name="name" placeholder="Imię" required>
@@ -61,10 +68,14 @@
       <form id="duLibForm">
         <input name="name" placeholder="Nazwa pozycji" required>
         <input name="description" placeholder="Krótki opis po angielsku (ułożenie ciał)" required>
+        <input name="anatomy" placeholder="Anatomia pozycji po angielsku (opcjonalnie, stała fraza do promptu)">
         <input type="file" name="file" accept="image/*">
         <button type="submit" class="alt">Dodaj pozycję</button>
       </form>
     </details>
+    <div class="fm-row"><textarea id="duAnat" rows="2" placeholder="Anatomia pozycji (angielski): stała fraza doklejana po opisie interakcji dla wybranej pozycji" disabled></textarea>
+      <button id="duAnatSave" class="alt" disabled>Zapisz anatomię pozycji</button></div>
+    <label class="check" style="margin:4px 0"><input type="checkbox" id="duSlotB" checked> Twarz partnera w kadrze (odznacz: 2. referencja = naga sylwetka A, partner opisany słowami)</label>
     <textarea id="duInter" rows="3" placeholder="Opis interakcji po angielsku, z imionami (kto co robi; trafia do promptu)"></textarea>
     <textarea id="duAction" rows="2" placeholder="Miejsce i otoczenie (angielski, opcjonalnie)"></textarea>
     <div class="fm-row"><input id="duOutA" placeholder="Strój A (puste = jak w kanonie)"><input id="duOutB" placeholder="Strój B (puste = jak w kanonie)"></div>
@@ -159,6 +170,7 @@
       <form id="canonForm">
         <select name="role">
           <option value="face">face (twarz)</option><option value="body">body (sylwetka)</option>
+          <option value="body_nude">body_nude (naga sylwetka)</option>
           <option value="front">front</option><option value="three_quarter">3/4</option>
           <option value="profile">profil</option><option value="back">tył</option>
         </select>

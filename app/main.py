@@ -647,7 +647,7 @@ def measure(aid: int):
 
 @app.get("/api/coverage")
 def coverage(character_id: int):
-    roles = ["face", "body", "front", "three_quarter", "profile", "back"]
+    roles = ["face", "body", "body_nude", "front", "three_quarter", "profile", "back"]
     have = {r["role"] for r in db.rows(
         "SELECT role FROM canon_assets WHERE character_id=? AND approved=1", (character_id,))}
     return {r: (r in have) for r in roles}

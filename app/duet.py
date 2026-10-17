@@ -39,6 +39,18 @@ BUILTIN = [
 ]
 
 
+# Stala fraza anatomii/ulozenia doklejana po opisie interakcji (kolumna interactions.anatomy). Wypelnione sa tylko pozycje
+# bez scen jednoznacznie seksualnych; pozostale (spooning, missionary, cowgirl, doggy, oral) zostawiam puste - uzytkownik
+# wpisuje fraze sam w interfejsie (pole "Anatomia pozycji") albo przez API. Zasiew nie nadpisuje tego, co uzytkownik wpisal.
+ANATOMY_DEFAULT = {
+    "standing-embrace": "Their bodies are pressed together, each with their arms around the other's back.",
+    "kiss": "Their faces are close, lips touching, eyes closed.",
+    "side-by-side": "They lie facing each other, noses almost touching, legs intertwined.",
+    "sitting-on-lap": "One person sits on the other's thighs facing them, both upright, arms around each other.",
+    "against-wall": "One person's back is flat against the wall, the other pressed close in front of them.",
+}
+
+
 def slugify(name: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
     return s[:40]
@@ -48,8 +60,10 @@ def seed_interactions():
     """Idempotentne zasianie wbudowanych pozycji (nie nadpisuje obrazu ani opisu dodanego przez uzytkownika)."""
     for name, desc in BUILTIN:
         if not db.one("SELECT 1 FROM interactions WHERE slug=?", (slugify(name),)):
-            db.run("INSERT INTO interactions(slug,name,description,image_path,builtin,created) VALUES(?,?,?,NULL,1,?)",
-                   (slugify(name), name, desc, db.now()))
+            db.run("INSERT INTO interactions(slug,name,description,image_path,builtin,created,anatomy) VALUES(?,?,?,NULL,1,?,?)",
+                   (slugify(name), name, desc, db.now(), ANATOMY_DEFAULT.get(slugify(name), "")))
+    for slug, anat in ANATOMY_DEFAULT.items():   # istniejace bazy: uzupelnij tylko puste
+        db.run("UPDATE interactions SET anatomy=? WHERE slug=? AND (anatomy IS NULL OR anatomy='')", (anat, slug))
 
 
 def safe_texts(*texts: str):
@@ -86,20 +100,36 @@ def _save_image(slug: str, data: bytes) -> str:
     return rel
 
 
-def add_interaction(name: str, description: str, image: bytes | None = None) -> dict:
+def add_interaction(name: str, description: str, image: bytes | None = None, anatomy: str = "") -> dict:
     name, description = (name or "").strip()[:60], (description or "").strip()[:300]
+    anatomy = (anatomy or "").strip()[:400]
     if not name or not description:
         raise DuetError("Podaj nazwe i krotki opis po angielsku")
-    safe_texts(name, description)
+    safe_texts(name, description, anatomy)
     slug = slugify(name)
     if not slug:
         raise DuetError("Nazwa musi zawierac litery lub cyfry")
     if db.one("SELECT 1 FROM interactions WHERE slug=?", (slug,)):
         raise DuetError("Pozycja o takiej nazwie juz istnieje", 409)
     rel = _save_image(slug, image) if image else None
-    db.run("INSERT INTO interactions(slug,name,description,image_path,builtin,created) VALUES(?,?,?,?,0,?)",
-           (slug, name, description, rel, db.now()))
+    db.run("INSERT INTO interactions(slug,name,description,image_path,builtin,created,anatomy) VALUES(?,?,?,?,0,?,?)",
+           (slug, name, description, rel, db.now(), anatomy))
     return get_interaction(slug)
+
+
+def update_interaction(ref, description: str | None = None, anatomy: str | None = None) -> dict:
+    """Edycja opisu i frazy anatomii pozycji (takze wbudowanej)."""
+    r = get_interaction(ref)
+    if description is not None:
+        description = description.strip()[:300]
+        if not description:
+            raise DuetError("Opis pozycji nie moze byc pusty")
+    if anatomy is not None:
+        anatomy = anatomy.strip()[:400]
+    safe_texts(description or "", anatomy or "")
+    db.run("UPDATE interactions SET description=?, anatomy=? WHERE id=?",
+           (r["description"] if description is None else description, r["anatomy"] if anatomy is None else anatomy, r["id"]))
+    return get_interaction(r["id"])
 
 
 def set_interaction_image(ref, image: bytes) -> dict:
@@ -147,7 +177,8 @@ def create_pair_shot(a_id: int, b_id: int, data: dict) -> dict:
     fmt = data.get("fmt") if data.get("fmt") in ("16:9", "9:16") else "16:9"
     shot = {"az": float(data.get("az", 0)), "el": float(data.get("el", 5)), "dist": float(data.get("dist", 3.5)),
             "fov": float(data.get("fov", 35)), "fmt": fmt, "action": texts[0][:600], "outfit": texts[1][:300],
-            "outfit_b": texts[2][:300], "interaction": texts[3][:600], "partner_id": b["id"]}
+            "outfit_b": texts[2][:300], "interaction": texts[3][:600], "partner_id": b["id"],
+            "ref_slot_b": data.get("ref_slot_b") if data.get("ref_slot_b") in pipeline.SLOTS_B else "partner_face"}
     sid = pipeline.new_shot(a["id"], shot, "")
     return db.one("SELECT * FROM shots WHERE id=?", (sid,))
 

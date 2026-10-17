@@ -63,7 +63,10 @@ with _lock:
                           ("shots", "outfit_b", "TEXT DEFAULT ''"),
                           ("films", "partner_id", "INTEGER"), ("films", "interaction", "TEXT DEFAULT ''"),
                           ("film_shots", "interaction", "TEXT DEFAULT ''"), ("film_shots", "outfit_b", "TEXT DEFAULT ''"),
-                          ("artifacts", "face_score_b", "REAL"), ("artifacts", "face_min_b", "REAL")):
+                          ("artifacts", "face_score_b", "REAL"), ("artifacts", "face_min_b", "REAL"),
+                          # --- Duet, etap E5: slot B referencji ('partner_face' | 'lead_body') i fraza anatomii pozycji ---
+                          ("shots", "ref_slot_b", "TEXT DEFAULT 'partner_face'"),
+                          ("interactions", "anatomy", "TEXT DEFAULT ''")):
         try:  # migracje: kolumny dodane po pierwszej wersji bazy
             _conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {typ}")
         except sqlite3.OperationalError:

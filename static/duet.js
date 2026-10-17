@@ -43,8 +43,9 @@ async function loadChars() {
   S.b = +$('duB').value || null;
 }
 async function coverage() {
-  const chip = (cov) => Object.entries(cov).filter(([k]) => ['face', 'body'].includes(k))
-    .map(([k, v]) => `<span class="chip ${v ? 'y' : 'n'}">${k === 'face' ? 'twarz' : 'sylwetka'}</span>`).join('');
+  const lab = { face: 'twarz', body: 'sylwetka', body_nude: 'naga sylwetka' };
+  const chip = (cov) => Object.entries(cov).filter(([k]) => k in lab)
+    .map(([k, v]) => `<span class="chip ${v ? 'y' : 'n'}">${lab[k]}</span>`).join('');
   $('duACov').innerHTML = S.a ? 'Kanon: ' + chip(await api(`/api/coverage?character_id=${S.a}`)) : '';
   $('duBCov').innerHTML = S.b ? 'Kanon: ' + chip(await api(`/api/coverage?character_id=${S.b}`)) : '';
 }
@@ -97,9 +98,23 @@ async function canonCands() {
   });
 }
 
+/* naga sylwetka w kanonie (rola body_nude), osobno dla A i B */
+[['duNudeA', () => S.a], ['duNudeB', () => S.b]].forEach(([id, who]) => $(id).addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!who()) { say('Najpierw wybierz postać.', true); return; }
+  try {
+    const f = new FormData(e.target); f.append('role', 'body_nude'); f.append('tier', 'main');
+    await api(`/api/characters/${who()}/canon`, { method: 'POST', body: f });
+    e.target.reset(); await coverage(); preview(); say('Dodano nagą sylwetkę do kanonu.');
+  } catch (x) { say(x.message, true); }
+}));
+
 /* ---------- biblioteka interakcji ---------- */
 async function loadLib() {
   LIB = await api('/api/duet/interactions');
+  const cur = LIB.find((x) => x.slug === S.lib);   // pole anatomii odzwierciedla wybrana pozycje (takze po odswiezeniu strony)
+  $('duAnat').disabled = $('duAnatSave').disabled = !cur;
+  if (cur && document.activeElement !== $('duAnat')) $('duAnat').value = cur.anatomy || '';
   const box = $('duLib'); box.innerHTML = '';
   box.append(el('button', { class: 'pill' + (S.lib ? '' : ' on'), text: 'bez pozycji', onclick: () => pickLib(null) }));
   LIB.forEach((it) => box.append(el('button', { class: 'pill' + (S.lib === it.slug ? ' on' : ''), title: it.description,
@@ -109,9 +124,17 @@ async function loadLib() {
 function pickLib(slug) {
   S.lib = slug; store.set('duLib', slug || '');
   const it = LIB.find((x) => x.slug === slug);
+  $('duAnat').value = it ? (it.anatomy || '') : ''; $('duAnat').disabled = $('duAnatSave').disabled = !it;
   if (it && (!$('duInter').value.trim() || LIB.some((x) => x.description === $('duInter').value.trim()))) $('duInter').value = it.description;
   S.shot = null; loadLib(); preview();
 }
+$('duAnatSave').onclick = async () => {
+  try {
+    if (!S.lib) throw new Error('Wybierz pozycję z biblioteki.');
+    await api(`/api/duet/interactions/${S.lib}`, { method: 'PATCH', headers: J, body: JSON.stringify({ anatomy: $('duAnat').value }) });
+    await loadLib(); preview(); say('Zapisano anatomię pozycji.');
+  } catch (x) { say(x.message, true); }
+};
 $('duLibForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   try {
@@ -122,11 +145,13 @@ $('duLibForm').addEventListener('submit', async (e) => {
 
 /* ---------- ujecie ---------- */
 const body = () => ({ a_id: S.a, b_id: S.b, az: +$('duAz').value, el: +$('duEl').value, dist: +$('duDi').value / 10, fov: 35, fmt: S.fmt,
-  action: $('duAction').value, outfit: $('duOutA').value, outfit_b: $('duOutB').value, interaction: $('duInter').value });
+  action: $('duAction').value, outfit: $('duOutA').value, outfit_b: $('duOutB').value, interaction: $('duInter').value,
+  ref_slot_b: $('duSlotB').checked ? 'partner_face' : 'lead_body' });
 const sparkOk = (p) => p && (p.entry().covered || p.spark());
 function labels() { $('duAzv').textContent = $('duAz').value + '°'; $('duElv').textContent = $('duEl').value + '°'; $('duDiv').textContent = ($('duDi').value / 10).toFixed(1) + ' m'; }
 function changed() { S.shot = null; labels(); ['duAz', 'duEl', 'duDi', 'duInter', 'duAction', 'duOutA', 'duOutB'].forEach((i) => store.set(i, $(i).value)); preview(); }
 ['duAz', 'duEl', 'duDi', 'duInter', 'duAction', 'duOutA', 'duOutB'].forEach((i) => $(i).addEventListener('input', changed));
+$('duSlotB').addEventListener('change', () => { store.set('duSlotB', $('duSlotB').checked ? '1' : '0'); S.shot = null; preview(); });
 document.querySelectorAll('[data-dufmt]').forEach((b) => b.onclick = () => {
   document.querySelectorAll('[data-dufmt]').forEach((x) => x.classList.remove('on')); b.classList.add('on');
   S.fmt = b.dataset.dufmt; store.set('duFmt', S.fmt); changed();
@@ -138,7 +163,7 @@ function preview() {
     try {
       const p = await post('/api/duet/plan', { ...body(), edit_model: P.edit ? P.edit.get() : null, interaction_id: S.lib });
       $('duPrompt').textContent = p.prompt;
-      $('duRefs').textContent = `1. twarz A, 2. twarz B${p.pose_used ? ', 3. obraz interakcji (tylko ułożenie ciał)' : ''} · limit modelu: ${p.max_refs}`;
+      $('duRefs').textContent = `1. twarz A, 2. ${p.slot_b === 'lead_body' ? 'naga sylwetka A (partner tylko w opisie)' : 'twarz B'}${p.pose_used ? ', 3. obraz interakcji (tylko ułożenie ciał)' : ''} · limit modelu: ${p.max_refs}`;
       $('duWarn').style.color = p.warnings.length ? 'var(--warn)' : '';
       $('duWarn').textContent = p.warnings.join(' ');
     } catch (e) { $('duWarn').style.color = 'var(--bad)'; $('duWarn').textContent = e.message; $('duPrompt').textContent = ''; $('duRefs').textContent = ''; }
@@ -149,7 +174,7 @@ $('duGen').onclick = async () => {
     if (!S.a || !S.b) throw new Error('Wybierz postać A i partnera B.');
     if (!S.shot) S.shot = (await post('/api/duet/shots', body())).id;
     const r = await post(`/api/duet/shots/${S.shot}/generate`, { count: +$('duCount').value, edit_model: P.edit.get() || null,
-      interaction_id: S.lib, allow_spark: sparkOk(P.edit) });
+      interaction_id: S.lib, allow_spark: sparkOk(P.edit), ref_slot_b: $('duSlotB').checked ? 'partner_face' : 'lead_body' });
     say(`Zlecono ${r.jobs.length} warianty (${r.model}, referencje: ${r.refs.length + (r.pose ? 1 : 0)}).` + (r.warnings.length ? ' ' + r.warnings.join(' ') : ''));
     refresh(true);
   } catch (e) { say(e.message, true); }
@@ -222,6 +247,7 @@ async function open() {
     S.fmt = store.get('duFmt', '16:9');
     document.querySelectorAll('[data-dufmt]').forEach((x) => x.classList.toggle('on', x.dataset.dufmt === S.fmt));
     S.lib = store.get('duLib', '') || null;
+    $('duSlotB').checked = store.get('duSlotB', '1') !== '0';
     P.edit = await Models.picker($('duEdit'), 'edit', { key: 'duEdit', defaultId: CFG.partner_model, onChange: preview });
     P.vid = await Models.picker($('duVid'), 'video', { key: 'duVid' });
     $('duRefresh').onclick = () => Models.refreshAll($('duRefresh'), $('duCat'));

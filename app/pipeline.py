@@ -244,11 +244,12 @@ def submit_video(shot: dict, c: dict, source_artifact_id: int | None, end_artifa
 
 
 def new_shot(character_id: int, shot: dict, prompt: str = "") -> int:
-    return db.run("INSERT INTO shots(character_id,az,el,dist,fov,fmt,action,outfit,prompt,created,partner_id,interaction,outfit_b) "
-                  "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    return db.run("INSERT INTO shots(character_id,az,el,dist,fov,fmt,action,outfit,prompt,created,partner_id,interaction,outfit_b,"
+                  "ref_slot_b) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                   (character_id, shot.get("az", 0), shot.get("el", 5), shot.get("dist", 4.5), shot.get("fov", 35),
                    shot.get("fmt", "16:9"), shot.get("action", ""), shot.get("outfit", ""), prompt, db.now(),
-                   shot.get("partner_id"), shot.get("interaction", "") or "", shot.get("outfit_b", "") or ""))
+                   shot.get("partner_id"), shot.get("interaction", "") or "", shot.get("outfit_b", "") or "",
+                   shot.get("ref_slot_b") if shot.get("ref_slot_b") in SLOTS_B else "partner_face"))
 
 
 # ---------------- Duet: dwie osoby w kadrze ----------------
@@ -269,19 +270,45 @@ def _face_asset(character_id: int) -> dict | None:
     return None
 
 
-def select_refs_duet(a_id: int, b_id: int, shot: dict, pose: dict | None = None, max_refs: int = 3) -> dict:
+SLOTS_B = ("partner_face", "lead_body")
+
+
+def _nude_body_asset(character_id: int) -> dict | None:
+    return db.one("SELECT * FROM canon_assets WHERE character_id=? AND approved=1 AND role='body_nude' ORDER BY id LIMIT 1",
+                  (character_id,))
+
+
+def select_refs_duet(a_id: int, b_id: int, shot: dict, pose: dict | None = None, max_refs: int = 3,
+                     slot_b: str = "partner_face") -> dict:
     """Referencje pary w kolejnosci sogni.py (-1 = pierwszy wgrany): [A_twarz, B_twarz] jako minimum, trzeci slot TYLKO na obraz
     interakcji (ulozenie cial) i tylko gdy model pozwala. Twarz ma priorytet nad sylwetka i katem: sylwetki i widoki kierunkowe
     nie wchodza do referencji pary. pose = {"artifact_id": n} albo {"path": "interactions/x.png"} albo None.
-    Zwraca {ref_ids, ref_artifact_ids, ref_paths, pose_used, warnings}."""
-    fa, fb = _face_asset(a_id), _face_asset(b_id)
-    for cid, f in ((a_id, fa), (b_id, fb)):
+    slot_b: 'partner_face' (domyslnie) = [A_twarz, B_twarz]; 'lead_body' = [A_twarz, A_naga_sylwetka (rola body_nude)], a partner
+    jest opisany tylko slowami w prompcie; bez zatwierdzonej body_nude wracamy do 'partner_face' z ostrzezeniem.
+    Zwraca {ref_ids, ref_artifact_ids, ref_paths, pose_used, warnings, slot_b}."""
+    slot_b = slot_b if slot_b in SLOTS_B else "partner_face"
+    warnings = []
+    second = None
+    if slot_b == "lead_body":
+        nb = _nude_body_asset(a_id)
+        if nb:
+            second = nb
+        else:
+            name = (db.one("SELECT name FROM characters WHERE id=?", (a_id,)) or {}).get("name", a_id)
+            warnings.append(f"Postać {name} nie ma nagiej sylwetki w kanonie (rola body_nude): używam twarzy partnera.")
+            slot_b = "partner_face"
+    fa = _face_asset(a_id)
+    fb = _face_asset(b_id) if slot_b == "partner_face" else None
+    for cid, f in ((a_id, fa), (b_id, fb if slot_b == "partner_face" else True)):
         if not f:
             name = (db.one("SELECT name FROM characters WHERE id=?", (cid,)) or {}).get("name", cid)
             raise PipelineError(f"Postac {name} nie ma kanonu twarzy - dodaj obraz twarzy (lub wygeneruj minimalny kanon).", 409)
-    if fa["sha256"] and fa["sha256"] == fb["sha256"]:
-        raise PipelineError("Postacie A i B maja ten sam obraz kanonu twarzy - model nie rozroznilby osob.", 409)
-    out = {"ref_ids": [fa["id"], fb["id"]], "ref_artifact_ids": [], "ref_paths": [], "pose_used": False, "warnings": []}
+    if slot_b == "partner_face":
+        second = fb
+        if fa["sha256"] and fa["sha256"] == fb["sha256"]:
+            raise PipelineError("Postacie A i B maja ten sam obraz kanonu twarzy - model nie rozroznilby osob.", 409)
+    out = {"ref_ids": [fa["id"], second["id"]], "ref_artifact_ids": [], "ref_paths": [], "pose_used": False,
+           "warnings": warnings, "slot_b": slot_b}
     if pose:
         if max_refs >= 3:
             if pose.get("artifact_id"):
@@ -295,7 +322,8 @@ def select_refs_duet(a_id: int, b_id: int, shot: dict, pose: dict | None = None,
 
 
 def plan_image_duet(c: dict, partner: dict, shot: dict, edit_model: str | None = None, pose: dict | None = None,
-                    interaction: str = "", outfit_a: str = "", outfit_b: str = ""):
+                    interaction: str = "", outfit_a: str = "", outfit_b: str = "", slot_b: str = "partner_face",
+                    anatomy: str = ""):
     """Planuje obraz pary. Bramka modelu: tylko model edycji z max_refs >= 2. Zwraca (model, prompt, refs, profil, ostrzezenia)."""
     if partner["id"] == c["id"]:
         raise PipelineError("Postac A i partner B musza byc roznymi postaciami.")
@@ -309,20 +337,22 @@ def plan_image_duet(c: dict, partner: dict, shot: dict, edit_model: str | None =
     if prof.max_refs < 2:
         raise PipelineError(f"Tryb Duet wymaga modelu edycji z max_refs >= 2; {prof.label} przyjmuje {prof.max_refs}.")
     cap = min(prof.max_refs, max(2, config.DUET_MAX_REFS))
-    refs = select_refs_duet(c["id"], partner["id"], shot, pose, cap)
+    refs = select_refs_duet(c["id"], partner["id"], shot, pose, cap, slot_b)
     warnings = list(refs["warnings"])
     if cap == 2:
         warnings.append(DUET_POSE_WARNING[0].upper() + DUET_POSE_WARNING[1:] + " (model przyjmuje 2 referencje: obie twarze).")
     n = 2 + (1 if refs["pose_used"] else 0)
     prompt = prompts.duet_prompt(c, partner, shot, n_refs=n, pose_ref=refs["pose_used"], interaction=interaction,
-                                 outfit_a=outfit_a, outfit_b=outfit_b)
+                                 outfit_a=outfit_a, outfit_b=outfit_b, slot_b=refs["slot_b"], anatomy=anatomy)
     return model, prompt, refs, prof, warnings
 
 
 def submit_image_duet(shot: dict, c: dict, partner: dict, edit_model: str | None = None, count: int = 1,
                       pose: dict | None = None, interaction: str = "", outfit_a: str = "", outfit_b: str = "",
-                      allow_spark: bool = False, label: str | None = None, film_shot_id=None, role=None) -> dict:
-    model, prompt, refs, _, warnings = plan_image_duet(c, partner, shot, edit_model, pose, interaction, outfit_a, outfit_b)
+                      allow_spark: bool = False, label: str | None = None, film_shot_id=None, role=None,
+                      slot_b: str = "partner_face", anatomy: str = "") -> dict:
+    model, prompt, refs, _, warnings = plan_image_duet(c, partner, shot, edit_model, pose, interaction, outfit_a, outfit_b,
+                                                       slot_b, anatomy)
     check_spark(model, allow_spark)
     params = {"prompt": prompt, "fmt": shot["fmt"], "ref_ids": refs["ref_ids"], "ref_artifact_ids": refs["ref_artifact_ids"],
               "ref_paths": refs["ref_paths"], "label": label or "duet", "duet": True}
@@ -330,4 +360,4 @@ def submit_image_duet(shot: dict, c: dict, partner: dict, edit_model: str | None
         params["allow_spark"] = True
     ids = [submit_job(shot["id"], "edit", model, params, film_shot_id, role) for _ in range(max(1, count))]
     return {"jobs": ids, "kind": "edit", "refs": refs["ref_ids"], "pose": refs["pose_used"], "warnings": warnings,
-            "model": model, "prompt": prompt}
+            "model": model, "prompt": prompt, "slot_b": refs["slot_b"]}

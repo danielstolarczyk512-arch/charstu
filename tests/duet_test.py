@@ -316,6 +316,92 @@ with TestClient(app) as c:
           and abs(row["face_score_b"] - 0.33) < 1e-9, str(row))
     guard.available, guard.similarity_duet, config.FACE_GUARD = real_av, real_sim, real_fg
 
+    # ---- J. etap E5: ref_slot_b, naga sylwetka w kanonie, frame_guard, anatomia, migracja ----
+    r_pf = pipeline.select_refs_duet(A["id"], B["id"], shot, None, 3, "partner_face")
+    check("J1 ref_slot_b=partner_face (domyslne): [A_twarz, B_twarz] jak dotad", r_pf["ref_ids"] == [fa["id"], fb["id"]]
+          and r_pf["slot_b"] == "partner_face")
+    r_fb = pipeline.select_refs_duet(A["id"], B["id"], shot, None, 3, "lead_body")
+    check("J2 lead_body bez body_nude: cofniecie do partner_face z ostrzezeniem",
+          r_fb["ref_ids"] == [fa["id"], fb["id"]] and r_fb["slot_b"] == "partner_face"
+          and any("body_nude" in w for w in r_fb["warnings"]), str(r_fb["warnings"]))
+    nb = canon(A["id"], (90, 90, 90), "body_nude")
+    r_lb = pipeline.select_refs_duet(A["id"], B["id"], shot, {"path": "interactions/x.png"}, 3, "lead_body")
+    check("J3 lead_body z body_nude: [A_twarz, A_naga_sylwetka] + uklad; twarz B nie zajmuje slotu",
+          r_lb["ref_ids"] == [fa["id"], nb["id"]] and r_lb["slot_b"] == "lead_body" and r_lb["ref_paths"] == ["interactions/x.png"]
+          and not r_lb["warnings"])
+    r_lb2 = pipeline.select_refs_duet(A["id"], C0["id"], shot, None, 2, "lead_body")
+    check("J4 lead_body: partner bez kanonu twarzy nie blokuje (opisany slowami), limit 2 = dwie referencje A",
+          r_lb2["ref_ids"] == [fa["id"], nb["id"]])
+    e = raises(pipeline.select_refs_duet, A["id"], B["id"], shot, None, 3, "partner_face")
+    check("J5 partner_face po dodaniu body_nude nadal tylko twarze (sylwetki nie wchodza)",
+          e is None and pipeline.select_refs_duet(A["id"], B["id"], shot, None, 3)["ref_ids"] == [fa["id"], fb["id"]])
+    p_lb = prompts.duet_prompt(A, B, shot, 2, slot_b="lead_body")
+    check("J6 prompt lead_body: 2. obraz = cialo A, partner opisany slowami i nie znika z promptu",
+          "second reference image shows Mira's body" in p_lb and "Kael has no reference image" in p_lb
+          and "Kael traits" not in p_lb or "Kael has no reference image" in p_lb)
+    check("J7 prompt lead_body nie przypisuje B zadnej referencji ('second reference image shows Kael')",
+          "second reference image shows Kael" not in p_lb and "Exactly two people are visible: Mira and Kael." in p_lb)
+    gd = prompts.frame_guard()
+    pp = prompts.duet_prompt(A, B, shot, 2)
+    vv = prompts.video_prompt(A, shot, B, "Mira and Kael stand together")
+    check("J8 frame_guard w prompcie obrazu i klipu pary: 'nobody else', 'Two pairs of legs', 'not merged'",
+          all(x in pp and x in vv for x in ("nobody else", "Two pairs of legs", "not merged")) and gd in pp and gd in vv)
+    solo = prompts.image_prompt(A, {**shot, "outfit": ""}, with_refs=True, style="delta") + prompts.video_prompt(A, shot)
+    check("J9 frame_guard nie wystepuje w promptach jednej postaci", "nobody else" not in solo and "pairs of legs" not in solo)
+    anat = "Their hands are joined and their foreheads touch."
+    pa2 = prompts.duet_prompt(A, B, shot, 2, interaction="Mira smiles at Kael", anatomy=anat)
+    check("J10 anatomy doklejona po opisie interakcji", pa2.index("Mira smiles at Kael") < pa2.index(anat))
+    lib2 = {x["slug"]: x for x in c.get("/api/duet/interactions").json()}
+    check("J11 kolumna anatomy: pozycje bez scen jednoznacznie seksualnych maja fraze, pozostale puste do wypelnienia w UI",
+          all(lib2[s]["anatomy"] for s in ("standing-embrace", "kiss", "side-by-side", "sitting-on-lap", "against-wall"))
+          and all(lib2[s]["anatomy"] == "" for s in ("spooning", "missionary", "cowgirl", "doggy", "oral")))
+    pr = c.patch("/api/duet/interactions/spooning", json={"anatomy": anat})
+    check("J12 anatomia edytowalna przez API (PATCH) i zapisana", pr.status_code == 200 and pr.json()["anatomy"] == anat)
+    duet.seed_interactions()
+    check("J13 ponowny zasiew nie nadpisuje frazy wpisanej przez uzytkownika",
+          {x["slug"]: x for x in c.get("/api/duet/interactions").json()}["spooning"]["anatomy"] == anat)
+    pr = c.patch("/api/duet/interactions/spooning", json={"anatomy": "two teens"})
+    check("J14 siatka wieku obejmuje anatomie", pr.status_code == 400)
+    own = c.post("/api/duet/interactions", data={"name": "wlasna poza", "description": "two adults stand apart", "anatomy": anat})
+    check("J15 wlasna pozycja z anatomia (pole w formularzu)", own.status_code == 200 and own.json()["anatomy"] == anat)
+    plj = c.post("/api/duet/plan", json={**base, "interaction_id": "kiss", "ref_slot_b": "lead_body"}).json()
+    check("J16 /api/duet/plan: anatomia pozycji w prompcie, slot_b, cofniecie przy braku body_nude u A (A ma body_nude: lead_body)",
+          lib2["kiss"]["anatomy"] in plj["prompt"] and plj["slot_b"] == "lead_body" and plj["refs"] == [fa["id"], nb["id"]])
+    shs = c.post("/api/duet/shots", json={**base, "ref_slot_b": "lead_body"}).json()
+    sh0 = c.post("/api/duet/shots", json=base).json()
+    check("J17 ujecie zapamietuje ref_slot_b; domyslnie partner_face", shs["ref_slot_b"] == "lead_body" and sh0["ref_slot_b"] == "partner_face")
+    gg = c.post(f"/api/duet/shots/{shs['id']}/generate", json={"count": 1, "interaction_id": "kiss"}).json()
+    jp = json.loads(db.one("SELECT params FROM jobs WHERE id=?", (gg["jobs"][0],))["params"])
+    check("J18 generate bierze slot z ujecia; job: refs [A_twarz, A_naga_sylwetka], prompt z anatomia",
+          jp["ref_ids"] == [fa["id"], nb["id"]] and gg["slot_b"] == "lead_body" and lib2["kiss"]["anatomy"] in jp["prompt"])
+    check("J19 /api/coverage zna role body_nude", c.get(f"/api/coverage?character_id={A['id']}").json().get("body_nude") is True
+          and c.get(f"/api/coverage?character_id={B['id']}").json().get("body_nude") is False)
+
+    # migracja ref_slot_b i anatomy: stara baza bez tych kolumn
+    tmp2 = tempfile.mkdtemp(prefix="studio-mig2-")
+    con = sqlite3.connect(Path(tmp2) / "studio.db")
+    con.executescript("""
+      CREATE TABLE characters(id INTEGER PRIMARY KEY, name TEXT NOT NULL, archetype TEXT, traits TEXT, outfit TEXT, style TEXT,
+                              adult_fictional INTEGER NOT NULL, created REAL);
+      CREATE TABLE shots(id INTEGER PRIMARY KEY, character_id INTEGER NOT NULL, az REAL, el REAL, dist REAL, fov REAL, fmt TEXT,
+                         action TEXT, prompt TEXT, created REAL, partner_id INTEGER, interaction TEXT, outfit_b TEXT);
+      CREATE TABLE interactions(id INTEGER PRIMARY KEY, slug TEXT NOT NULL UNIQUE, name TEXT NOT NULL, description TEXT NOT NULL,
+                                image_path TEXT, builtin INTEGER DEFAULT 0, created REAL);
+      INSERT INTO characters VALUES(1,'S','adult x','t','o','s',1,1.0);
+      INSERT INTO shots(id,character_id,partner_id,interaction) VALUES(7,1,2,'old');
+      INSERT INTO interactions(slug,name,description,builtin) VALUES('kiss','kiss','d',1);
+    """)
+    con.commit()
+    con.close()
+    code2 = ("import os;os.environ['STUDIO_DATA']=%r;os.environ['PROVIDER']='mock';import app.db as d;"
+             "s=d.one('SELECT ref_slot_b,interaction FROM shots WHERE id=7');i=d.one('SELECT anatomy FROM interactions');"
+             "print(s['ref_slot_b'],s['interaction'],repr(i['anatomy']))") % tmp2
+    o1 = subprocess.run([sys.executable, "-c", code2], capture_output=True, text=True, cwd=ROOT)
+    o2 = subprocess.run([sys.executable, "-c", code2], capture_output=True, text=True, cwd=ROOT)
+    check("J20 migracja: istniejace ujecie dostaje ref_slot_b='partner_face' (zachowuje sie jak dotad), anatomy='' ; powtorka bez bledu",
+          o1.returncode == 0 and o2.returncode == 0 and o1.stdout.strip() == "partner_face old ''" and o1.stdout == o2.stdout,
+          (o1.stdout + o1.stderr + o2.stderr)[-300:])
+
     # ---- I. sciezka jednej postaci bez zmian ----
     sg = c.post("/api/shots", json={"character_id": A["id"], "az": 40, "el": 5, "dist": 4, "fov": 35, "fmt": "16:9",
                                     "action": "stands", "outfit": ""})
