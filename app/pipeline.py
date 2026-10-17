@@ -235,7 +235,8 @@ def submit_video(shot: dict, c: dict, source_artifact_id: int | None, end_artifa
                             "Wybierz inny model klipu.")
     check_spark(model, allow_spark)
     partner = db.one("SELECT * FROM characters WHERE id=?", (shot["partner_id"],)) if shot.get("partner_id") else None
-    params = {"prompt": prompts.video_prompt(c, shot, partner, shot.get("interaction") or ""), "fmt": shot["fmt"],
+    params = {"prompt": prompts.video_prompt(c, shot, partner, shot.get("interaction") or "", shot.get("outfit") or "",
+                                                shot.get("outfit_b") or ""), "fmt": shot["fmt"],
               "source_artifact_id": source_artifact_id,
               "end_artifact_id": end_artifact_id,
               "duration": duration or (config.FLF_DURATION if end_artifact_id else config.VIDEO_DURATION)}

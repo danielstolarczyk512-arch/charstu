@@ -128,7 +128,7 @@ def plan(g: PlanIn):
                                                 g.outfit, g.outfit_b)
     return {"model": model, "prompt": prompt, "refs": refs["ref_ids"], "pose_used": refs["pose_used"], "warnings": warnings,
             "max_refs": prof.max_refs, "covered": models.covered(model),
-            "video_prompt": prompts.video_prompt(a, shot, b, g.interaction)}
+            "video_prompt": prompts.video_prompt(a, shot, b, g.interaction, g.outfit, g.outfit_b)}
 
 
 @router.post("/api/duet/shots")

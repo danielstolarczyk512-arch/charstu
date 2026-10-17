@@ -161,16 +161,24 @@ def duet_prompt(c: dict, partner: dict, shot: dict, n_refs: int = 2, pose_ref: b
     return " ".join([scene, two_people(a, b), *wear, *refs])
 
 
-def video_prompt(c: dict, shot: dict, partner: dict | None = None, interaction: str = "") -> str:
+def _unclothed(*outfits: str) -> bool:
+    """True, gdy ktorykolwiek ze strojow opisuje brak ubrania (nude/naked/topless/bare...)."""
+    return any(_UNCLOTHED.match(_clean(o)) for o in outfits if o and _clean(o))
+
+
+def video_prompt(c: dict, shot: dict, partner: dict | None = None, interaction: str = "", outfit_a: str = "",
+                 outfit_b: str = "") -> str:
     """LTX: jeden plynny akapit w czasie terazniejszym. Z `partner`: liczba mnoga, obie osoby nazwane; niezmienny strój jest
-    wymuszany tylko, gdy interakcja nie opisuje zmiany ubrania."""
+    wymuszany tylko, gdy zaden ze strojow nie opisuje braku ubrania (_UNCLOTHED na polach stroju A i B) i interakcja nie
+    opisuje zmiany ubrania (_OUTFIT_CHANGE). Stroje domyslnie z ujecia (pola outfit / outfit_b)."""
     cam = describe(shot["az"], shot["el"], shot["dist"], shot["fov"])["en"]
     if partner is not None:
         a, b = _roles(c, partner)
         inter = _clean(interaction or shot.get("interaction"))
         action = _clean(shot.get("action"))
         doing = " ".join(f"{t[0].upper() + t[1:]}." for t in (inter, action) if t) or f"{a} and {b} stand close together and breathe."
-        keep = "faces and hairstyles" if _OUTFIT_CHANGE.search(inter) else "faces, hairstyles and outfits"
+        nude = _unclothed(outfit_a or shot.get("outfit"), outfit_b or shot.get("outfit_b"))
+        keep = "faces and hairstyles" if (nude or _OUTFIT_CHANGE.search(inter)) else "faces, hairstyles and outfits"
         return (f"A {cam} of {a} and {b}. {doing} The camera moves smoothly and steadily while both people keep their own "
                 f"{keep} throughout the entire clip. Both people stay clearly visible and distinct.")
     action = (shot.get("action") or "stands still and breathes").strip()

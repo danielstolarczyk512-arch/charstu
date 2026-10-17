@@ -71,5 +71,17 @@ check("W4 'barely dressed' / 'bareback' nie sa traktowane jak brak ubrania",
 check("W5 strój z karty (nie z ujecia) tez przechodzi przez wearing",
       "wearing" not in prompts._described({**C, "outfit": "naked"}, ""))
 
+# --- V. klip pary: wymuszanie stroju zalezy od POL STROJU, nie tylko od opisu interakcji (zadanie 1 etapu E5) ---
+PA, PB = {"name": "Mira"}, {"name": "Kael"}
+sh = {"az": 0, "el": 5, "dist": 3.0, "fov": 35, "action": "", "outfit": "", "outfit_b": ""}
+v_nude = prompts.video_prompt(PA, sh, PB, "Mira and Kael lie close together on a bed", "fully nude", "fully nude")
+check("V1 stroje 'fully nude': klip nie wymusza stroju", "keep their own faces and hairstyles" in v_nude and "outfits" not in v_nude, v_nude)
+v_nude_b = prompts.video_prompt(PA, {**sh, "outfit_b": "naked"}, PB, "Mira and Kael lie close together on a bed")
+check("V2 jedna osoba naga (pole ujecia outfit_b): bez wymuszania stroju", "outfits" not in v_nude_b)
+v_dressed = prompts.video_prompt(PA, {**sh, "outfit": "red dress", "outfit_b": "grey suit"}, PB, "Mira and Kael dance")
+check("V3 para ubrana, interakcja bez slow o ubraniu: stroj wymuszony", "faces, hairstyles and outfits" in v_dressed)
+v_chg = prompts.video_prompt(PA, sh, PB, "Mira slowly removes his shirt")
+check("V4 ubranie znika w trakcie klipu (interakcja): bez wymuszania stroju", "outfits" not in v_chg)
+
 print(f"\nWYNIK: {sum(results)}/{len(results)}")
 raise SystemExit(0 if all(results) else 1)
