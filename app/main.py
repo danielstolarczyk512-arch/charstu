@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 import threading
 
-from . import catalog_sync, config, db, films_api, models, pipeline, producer, prompts, skeleton
+from . import catalog_sync, config, db, duet, duet_api, films_api, models, pipeline, producer, prompts, skeleton
 from .camera import describe
 from .providers.base import GenRequest
 from .providers.factory import make_provider
@@ -47,6 +47,8 @@ def _sync_catalog():
 
 app = FastAPI(title="Character Studio", lifespan=lifespan)
 app.include_router(films_api.router)
+app.include_router(duet_api.router)
+duet.seed_interactions()
 
 
 class CharacterIn(BaseModel):
@@ -56,6 +58,7 @@ class CharacterIn(BaseModel):
     outfit: str = ""
     style: str = ""
     adult_fictional: bool = False
+    kind: str = "lead"   # "lead" (bohater) albo "partner" (druga osoba w trybie Duet)
 
 
 class ShotIn(BaseModel):
@@ -111,9 +114,14 @@ def create_character(c: CharacterIn):
         raise HTTPException(400, "Postać musi być fikcyjna i dorosła (18+). Zaznacz potwierdzenie.")
     if not c.name.strip():
         raise HTTPException(400, "Podaj imię postaci")
+    kind = c.kind if c.kind in ("lead", "partner") else "lead"
+    if kind == "partner":   # siatka wieku obejmuje tez partnera (Duet); dla bohatera luka opisana w DUET_RAPORT.md
+        _safe_char_texts(c.name, c.archetype, c.traits, c.outfit, c.style)
+        if "adult" not in (c.archetype or "").lower():
+            c.archetype = ("adult " + (c.archetype or "")).strip()
     cid = db.run(
-        "INSERT INTO characters(name,archetype,traits,outfit,style,adult_fictional,created) VALUES(?,?,?,?,?,1,?)",
-        (c.name.strip(), c.archetype, c.traits, c.outfit, c.style, db.now()))
+        "INSERT INTO characters(name,archetype,traits,outfit,style,adult_fictional,created,kind) VALUES(?,?,?,?,?,1,?,?)",
+        (c.name.strip(), c.archetype, c.traits, c.outfit, c.style, db.now(), kind))
     return _character(cid)
 
 
@@ -150,8 +158,10 @@ def patch_character(cid: int, p: CharacterPatch):
 @app.delete("/api/characters/{cid}")
 def delete_character(cid: int):
     _character(cid)
-    if db.one("SELECT 1 FROM films WHERE character_id=?", (cid,)):
-        raise HTTPException(409, "Postac ma filmy - usun je najpierw")
+    if db.one("SELECT 1 FROM films WHERE character_id=? OR partner_id=?", (cid, cid)):
+        raise HTTPException(409, "Postac ma filmy (jako bohater albo partner) - usun je najpierw")
+    if db.one("SELECT 1 FROM shots WHERE partner_id=?", (cid,)):   # SQLite uzywa ponownie numerow: nie zostawiamy wiszacych partnerow
+        raise HTTPException(409, "Postac jest partnerem w ujeciach Duet - usun te ujecia najpierw")
     db.run("DELETE FROM outfits WHERE character_id=?", (cid,))
     db.run("DELETE FROM canon_assets WHERE character_id=?", (cid,))
     db.run("DELETE FROM characters WHERE id=?", (cid,))

@@ -33,7 +33,8 @@ def safe_texts(*texts: str):
         raise FilmError(assistant.REFUSAL)
 
 
-SHOT_FIELDS = ("title", "az", "el", "dist", "fov", "fmt", "action", "outfit", "dialogue", "duration", "link_next", "note")
+SHOT_FIELDS = ("title", "az", "el", "dist", "fov", "fmt", "action", "outfit", "dialogue", "duration", "link_next", "note",
+               "interaction", "outfit_b")
 
 
 def clean_shot(d: dict, base: dict | None = None) -> dict:
@@ -52,27 +53,33 @@ def clean_shot(d: dict, base: dict | None = None) -> dict:
         "duration": int(_clamp(d.get("duration", b.get("duration")), 2, 20, 5)),
         "link_next": 1 if d.get("link_next", b.get("link_next")) else 0,
         "note": _text(d.get("note", b.get("note")), 300),
+        "interaction": _text(d.get("interaction", b.get("interaction")), 600),   # Duet: opis interakcji pary (angielski)
+        "outfit_b": _text(d.get("outfit_b", b.get("outfit_b")), 300),            # Duet: strój partnera (puste = kanon)
     }
-    safe_texts(out["title"], out["action"], out["outfit"], out["dialogue"], out["note"])
+    safe_texts(out["title"], out["action"], out["outfit"], out["dialogue"], out["note"], out["interaction"], out["outfit_b"])
     return out
 
 
 # ---------------- tworzenie i edycja ----------------
 def create_film(character_id: int, title: str, logline: str = "", synopsis: str = "", fmt: str = "16:9",
                 music_prompt: str = "", budget_spark: float | None = None, image_model: str | None = None,
-                edit_model: str | None = None) -> int:
+                edit_model: str | None = None, partner_id: int | None = None, interaction: str = "") -> int:
     if not db.one("SELECT id FROM characters WHERE id=?", (character_id,)):
         raise FilmError("Nie ma takiej postaci", 404)
+    if partner_id is not None:
+        if partner_id == character_id or not db.one("SELECT id FROM characters WHERE id=?", (partner_id,)):
+            raise FilmError("Partner musi byc istniejaca postacia rozna od bohatera", 404 if partner_id != character_id else 400)
+        safe_texts(interaction)
     if not title.strip():
         raise FilmError("Podaj tytul filmu")
     safe_texts(title, logline, synopsis, music_prompt)
     now = db.now()
     return db.run("INSERT INTO films(title,logline,synopsis,character_id,fmt,music_prompt,budget_spark,image_model,edit_model,"
-                  "status,created,updated) VALUES(?,?,?,?,?,?,?,?,?,'draft',?,?)",
+                  "status,created,updated,partner_id,interaction) VALUES(?,?,?,?,?,?,?,?,?,'draft',?,?,?,?)",
                   (_text(title, 120), _text(logline, 400), _text(synopsis, 4000), character_id,
                    fmt if fmt in FMTS else "16:9", _text(music_prompt, 800),
                    config.FILM_BUDGET_SPARK if budget_spark is None else float(budget_spark),
-                   image_model or None, edit_model or None, now, now))
+                   image_model or None, edit_model or None, now, now, partner_id, _text(interaction, 600)))
 
 
 def update_film(film_id: int, **f) -> dict:
@@ -93,6 +100,16 @@ def update_film(film_id: int, **f) -> dict:
     if f.get("auto_pick") is not None:
         sets.append("auto_pick=?")
         args.append(1 if f["auto_pick"] else 0)
+    if "partner_id" in f:   # Duet: partner filmu (None = film jednoosobowy)
+        pid = f["partner_id"]
+        if pid is not None and (pid == film["character_id"] or not db.one("SELECT id FROM characters WHERE id=?", (pid,))):
+            raise FilmError("Partner musi byc istniejaca postacia rozna od bohatera")
+        sets.append("partner_id=?")
+        args.append(pid)
+    if f.get("interaction") is not None:
+        safe_texts(str(f["interaction"]))
+        sets.append("interaction=?")
+        args.append(_text(f["interaction"], 600))
     if f.get("allow_spark") is not None:   # zgoda na zuzycie Premium Spark przy modelach poza planem
         sets.append("allow_spark=?")
         args.append(1 if f["allow_spark"] else 0)
@@ -169,9 +186,10 @@ def add_shot(scene_id: int, data: dict, idx: int | None = None) -> int:
     if at < n:
         db.run("UPDATE film_shots SET idx=idx+1 WHERE scene_id=? AND idx>=?", (scene_id, at))
     return db.run("INSERT INTO film_shots(film_id,scene_id,idx,title,az,el,dist,fov,fmt,action,outfit,dialogue,duration,"
-                  "link_next,note,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  "link_next,note,created,interaction,outfit_b) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                   (film["id"], scene_id, at, d["title"], d["az"], d["el"], d["dist"], d["fov"], d["fmt"], d["action"],
-                   d["outfit"], d["dialogue"], d["duration"], d["link_next"], d["note"], db.now()))
+                   d["outfit"], d["dialogue"], d["duration"], d["link_next"], d["note"], db.now(), d["interaction"],
+                   d["outfit_b"]))
 
 
 def get_shot(shot_id: int) -> dict:
@@ -186,8 +204,9 @@ def update_shot(shot_id: int, data: dict) -> dict:
     d = clean_shot({k: v for k, v in data.items() if k in SHOT_FIELDS}, base=cur)
     # zmiana opisu/kamery uniewaznia wybrany obraz i klip? NIE - uzytkownik moze chciec zachowac; wymaga jawnego "reset".
     db.run("UPDATE film_shots SET title=?,az=?,el=?,dist=?,fov=?,fmt=?,action=?,outfit=?,dialogue=?,duration=?,link_next=?,"
-           "note=? WHERE id=?", (d["title"], d["az"], d["el"], d["dist"], d["fov"], d["fmt"], d["action"], d["outfit"],
-                                d["dialogue"], d["duration"], d["link_next"], d["note"], shot_id))
+           "note=?,interaction=?,outfit_b=? WHERE id=?", (d["title"], d["az"], d["el"], d["dist"], d["fov"], d["fmt"], d["action"],
+                                                          d["outfit"], d["dialogue"], d["duration"], d["link_next"], d["note"],
+                                                          d["interaction"], d["outfit_b"], shot_id))
     if data.get("dialogue") is not None and d["dialogue"] != cur["dialogue"]:
         db.run("UPDATE film_shots SET speech_artifact_id=NULL WHERE id=?", (shot_id,))  # nowa kwestia -> nowe nagranie
     return get_shot(shot_id)
@@ -242,12 +261,16 @@ def ordered_shots(film_id: int) -> list[dict]:
                    "WHERE fs.film_id=? ORDER BY sc.idx, fs.idx", (film_id,))
 
 
-def effective_shot(scene: dict, fs: dict) -> dict:
+def effective_shot(scene: dict, fs: dict, film: dict | None = None) -> dict:
     """Ujecie w postaci uzywanej przez prompty: otoczenie i swiatlo sceny + akcja ujecia (spojnosc miejsca w scenie)."""
     parts = [scene.get("location"), scene.get("lighting"), fs.get("action")]
     action = ". ".join(p.strip().rstrip(".") for p in parts if p and p.strip())
-    return {"az": fs["az"], "el": fs["el"], "dist": fs["dist"], "fov": fs["fov"], "fmt": fs["fmt"], "action": action,
-            "outfit": fs.get("outfit") or ""}
+    out = {"az": fs["az"], "el": fs["el"], "dist": fs["dist"], "fov": fs["fov"], "fmt": fs["fmt"], "action": action,
+           "outfit": fs.get("outfit") or ""}
+    if film and film.get("partner_id"):   # Duet: partner, interakcja (ujecie ma pierwszenstwo przed ogolna z filmu) i strój B
+        out.update({"partner_id": film["partner_id"], "outfit_b": fs.get("outfit_b") or "",
+                    "interaction": (fs.get("interaction") or film.get("interaction") or "")})
+    return out
 
 
 def _art(aid: int | None) -> dict | None:

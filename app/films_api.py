@@ -24,6 +24,8 @@ class FilmIn(BaseModel):
     budget_spark: float | None = None
     image_model: str | None = None
     edit_model: str | None = None
+    partner_id: int | None = None      # Duet: druga osoba w kadrze (None = film jednoosobowy)
+    interaction: str = ""              # Duet: ogolny opis interakcji (angielski); ujecie moze go nadpisac
 
 
 class FilmPatch(BaseModel):
@@ -37,6 +39,8 @@ class FilmPatch(BaseModel):
     allow_spark: bool | None = None
     image_model: str | None = None
     edit_model: str | None = None
+    partner_id: int | None = None
+    interaction: str | None = None
 
 
 class SceneIn(BaseModel):
@@ -67,6 +71,8 @@ class ShotIn(BaseModel):
     duration: int = 5
     link_next: bool = False
     note: str = ""
+    interaction: str = ""       # Duet
+    outfit_b: str = ""          # Duet: strój partnera
     idx: int | None = None
 
 
@@ -101,7 +107,7 @@ def list_films():
 @router.post("/api/films")
 def create_film(f: FilmIn):
     fid = _wrap(F.create_film, f.character_id, f.title, f.logline, f.synopsis, f.fmt, f.music_prompt, f.budget_spark,
-                f.image_model, f.edit_model)
+                f.image_model, f.edit_model, f.partner_id, f.interaction)
     return F.film_tree(fid)
 
 

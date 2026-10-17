@@ -54,5 +54,9 @@ FILM_MAX_TASK_ATTEMPTS = int(os.getenv("FILM_MAX_TASK_ATTEMPTS", "3"))
 FILM_PAUSE_MINUTES = int(os.getenv("FILM_PAUSE_MINUTES", "20"))
 # Asystent (model jezykowy Sogni, rozliczany z planu). Dostepne modele: GET /v1/models.
 LLM_MODEL = os.getenv("LLM_MODEL", "qwen3.6-35b-a3b-gguf-iq4xs")
+# Duet: model edycji dla pary (>= 2 referencje), limit referencji i domyslna pozycja z biblioteki interakcji.
+PARTNER_MODEL = os.getenv("PARTNER_MODEL", "qwen").strip()
+DUET_MAX_REFS = int(os.getenv("DUET_MAX_REFS", "3"))
+INTERACTION_DEFAULT = os.getenv("INTERACTION_DEFAULT", "standing embrace").strip()
 # Pomiar twarzy (InsightFace). Miara orientacyjna - nie odrzuca wynikow automatycznie.
 FACE_GUARD = _bool("FACE_GUARD", "true")

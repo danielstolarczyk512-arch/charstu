@@ -49,6 +49,10 @@ class Runner:
             ra = db.one("SELECT path FROM artifacts WHERE id=?", (aid,))
             if ra:
                 refs.append(config.DATA / ra["path"])
+        for rp in p.get("ref_paths") or []:   # referencje z plikow w data/ (np. obraz z biblioteki interakcji), po artefaktach
+            full = (config.DATA / rp).resolve()
+            if config.DATA.resolve() in full.parents and full.is_file():
+                refs.append(full)
         src = None
         if p.get("source_artifact_id"):
             a = db.one("SELECT path FROM artifacts WHERE id=?", (p["source_artifact_id"],))
@@ -127,10 +131,12 @@ def measure_artifact(artifact_id: int, source: Path | None = None) -> dict | Non
         from . import guard
         if not guard.available():
             return None
-        a = db.one("SELECT a.*, s.character_id FROM artifacts a JOIN shots s ON s.id=a.shot_id WHERE a.id=?",
+        a = db.one("SELECT a.*, s.character_id, s.partner_id FROM artifacts a JOIN shots s ON s.id=a.shot_id WHERE a.id=?",
                    (artifact_id,))
         if not a:
             return None
+        if a["partner_id"]:   # ujecie pary: dwie liczby, kazda twarz dopasowana do blizszego kanonu (A albo B)
+            return _measure_duet(a)
         path = config.DATA / a["path"]
         canon = canon_face_path(a["character_id"])
         if a["kind"] == "video":
@@ -158,6 +164,35 @@ def measure_artifact(artifact_id: int, source: Path | None = None) -> dict | Non
     except Exception:  # noqa: BLE001
         log.exception("pomiar twarzy nie powiodl sie dla artefaktu %s", artifact_id)
         return None
+
+
+def _measure_duet(a: dict) -> dict | None:
+    """Pomiar pary (guard.match_faces): A -> face_score/face_min, B -> face_score_b/face_min_b. Miara orientacyjna."""
+    from . import guard
+    def canon(cid):   # jak pipeline._face_asset: twarz, a przy braku - widok z przodu/3-4/sylwetka (wgrany obraz bez pelnego kanonu)
+        for role in ("face", "front", "three_quarter", "body"):
+            r = db.one("SELECT path FROM canon_assets WHERE character_id=? AND approved=1 AND role=? ORDER BY id LIMIT 1", (cid, role))
+            if r:
+                return config.DATA / r["path"]
+        return None
+    ca, cb = canon(a["character_id"]), canon(a["partner_id"])
+    if not (ca or cb):
+        return None
+    path = config.DATA / a["path"]
+    if a["kind"] == "video":
+        r = guard.video_scores_duet(path, ca, cb, n=8)
+        sa, la, sb, lb = r["mean_a"], r["min_a"], r["mean_b"], r["min_b"]
+        note = {"vs": "kanon A i B (para)", "frames_a": r["frames_a"], "frames_b": r["frames_b"],
+                "frames_with_both": r["frames_with_both"]}
+    else:
+        r = guard.similarity_duet(path, ca, cb)
+        sa, la, sb, lb = r["a"], None, r["b"], None
+        note = {"vs": "kanon A i B (para)", "faces": r["faces"]}
+    if sa is None and sb is None:
+        note["reason"] = "brak wykrytej twarzy (np. widok z tylu)"
+    db.run("UPDATE artifacts SET face_score=?, face_min=?, face_score_b=?, face_min_b=?, face_note=? WHERE id=?",
+           (sa, la, sb, lb, json.dumps(note), a["id"]))
+    return {"score": sa, "min": la, "score_b": sb, "min_b": lb, **note}
 
 
 def new_idem_key() -> str:

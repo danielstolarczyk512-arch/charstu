@@ -46,18 +46,32 @@ Zasady:
 """ + assistant.SHARED_RULES
 
 
-def _ctx_text(character: dict, film: dict) -> str:
-    return json.dumps({"bohater": {k: character.get(k) for k in ("name", "archetype", "traits", "outfit", "style")},
-                       "format": film["fmt"]}, ensure_ascii=False)
+DUET_RULES = """
+TRYB DUET (w kadrze sa DWIE osoby: bohater i partner; oboje sa opisani w kontekscie):
+- action i interaction pisz PO ANGIELSKU, uzywajac IMION obu osob (kto co robi wobec kogo); nie pisz "the character".
+- interaction: jedno zdanie o tym, co robia razem (np. pozycja, gest, kontakt); puste tylko, gdy ujecie jest czysto kadrowe.
+- outfit = strój bohatera, outfit_b = strój partnera; puste = jak w kanonie.
+- duration: 4-15 sekund; dluzsze (do 15) w scenach zblizeniowych i dluzszych interakcjach.
+- Obie osoby maja byc widoczne w kazdym ujeciu; zblizenia planuj tak, by oboje mieli twarz w kadrze, gdy to mozliwe.
+"""
+
+
+def _ctx_text(character: dict, film: dict, partner: dict | None = None) -> str:
+    ctx = {"bohater": {k: character.get(k) for k in ("name", "archetype", "traits", "outfit", "style")},
+           "format": film["fmt"]}
+    if partner:
+        ctx["partner"] = {k: partner.get(k) for k in ("name", "archetype", "traits", "outfit", "style")}
+        ctx["interakcja_filmu"] = film.get("interaction") or ""
+    return json.dumps(ctx, ensure_ascii=False)
 
 
 def _set_state(film_id: int, state: str):
     db.run("UPDATE films SET plan_state=?, updated=? WHERE id=?", (state, db.now(), film_id))
 
 
-def plan_outline(provider, film: dict, character: dict, idea: str, n_scenes: int) -> dict:
-    msgs = [{"role": "system", "content": OUTLINE_SYSTEM},
-            {"role": "system", "content": "Kontekst (JSON): " + _ctx_text(character, film)},
+def plan_outline(provider, film: dict, character: dict, idea: str, n_scenes: int, partner: dict | None = None) -> dict:
+    msgs = [{"role": "system", "content": OUTLINE_SYSTEM + (DUET_RULES if partner else "")},
+            {"role": "system", "content": "Kontekst (JSON): " + _ctx_text(character, film, partner)},
             {"role": "user", "content": f"Pomysl na film: {idea[:2000]}\nLiczba scen: {n_scenes}"}]
     raw, text = assistant.chat_json(provider, msgs, timeout=100)
     if raw is None:
@@ -77,11 +91,16 @@ def plan_outline(provider, film: dict, character: dict, idea: str, n_scenes: int
     return out
 
 
-def plan_scene(provider, film: dict, character: dict, outline: dict, scene_idx: int, n_shots: int) -> list[dict]:
+MAX_DURATION = 8          # film jednoosobowy: klipy 4-8 s
+MAX_DURATION_DUET = 15    # film z partnerem: do 15 s (sceny zblizeniowe i dluzsze interakcje)
+
+
+def plan_scene(provider, film: dict, character: dict, outline: dict, scene_idx: int, n_shots: int,
+               partner: dict | None = None) -> list[dict]:
     sc = outline["scenes"][scene_idx]
     prev = [f"{i + 1}. {s['title']}: {s['summary']}" for i, s in enumerate(outline["scenes"][:scene_idx])]
-    msgs = [{"role": "system", "content": SCENE_SYSTEM},
-            {"role": "system", "content": "Kontekst (JSON): " + _ctx_text(character, film)},
+    msgs = [{"role": "system", "content": SCENE_SYSTEM + (DUET_RULES if partner else "")},
+            {"role": "system", "content": "Kontekst (JSON): " + _ctx_text(character, film, partner)},
             {"role": "user", "content": json.dumps({
                 "film": {"tytul": outline["title"], "opis": outline["synopsis"]},
                 "poprzednie_sceny": prev, "ta_scena": sc, "numer_sceny": scene_idx + 1,
@@ -95,7 +114,7 @@ def plan_scene(provider, film: dict, character: dict, outline: dict, scene_idx: 
     cleaned = []
     for i, s in enumerate(shots):
         d = F.clean_shot({**s, "fmt": film["fmt"]})   # zakresy, dlugosc 2-20 s, siatka bezpieczenstwa
-        d["duration"] = int(max(4, min(8, d["duration"])))
+        d["duration"] = int(max(4, min(MAX_DURATION_DUET if partner else MAX_DURATION, d["duration"])))
         d["link_next"] = 1 if (s.get("link_next") and i < len(shots) - 1) else 0
         cleaned.append(d)
     return cleaned
@@ -107,7 +126,8 @@ def run_plan(provider, film_id: int, idea: str, n_scenes: int, n_shots: int, rep
         film = F.get_film_row(film_id)
         character = db.one("SELECT * FROM characters WHERE id=?", (film["character_id"],))
         _set_state(film_id, "planning: zarys filmu")
-        outline = plan_outline(provider, film, character, idea, n_scenes)
+        partner = db.one("SELECT * FROM characters WHERE id=?", (film["partner_id"],)) if film.get("partner_id") else None
+        outline = plan_outline(provider, film, character, idea, n_scenes, partner)
         if replace:
             for sc in db.rows("SELECT id FROM scenes WHERE film_id=?", (film_id,)):
                 F.delete_scene(sc["id"])
@@ -116,7 +136,7 @@ def run_plan(provider, film_id: int, idea: str, n_scenes: int, n_shots: int, rep
         scene_ids = [F.add_scene(film_id, s["title"], s["summary"], s["location"], s["lighting"]) for s in outline["scenes"]]
         for i, sid in enumerate(scene_ids):
             _set_state(film_id, f"planning: scena {i + 1}/{len(scene_ids)}")
-            for d in plan_scene(provider, film, character, outline, i, n_shots):
+            for d in plan_scene(provider, film, character, outline, i, n_shots, partner):
                 F.add_shot(sid, d)
         _set_state(film_id, "done")
     except Exception as e:  # noqa: BLE001 - blad pokazujemy w interfejsie

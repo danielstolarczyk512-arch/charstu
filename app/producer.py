@@ -64,10 +64,11 @@ def _ctx(fs_id: int):
 def shot_row(fs_id: int) -> dict:
     """Wiersz 'shots' (jak w Studiu) dla ujecia filmu; odswiezany, gdy zmienil sie opis/kamera."""
     film, scene, fs, c = _ctx(fs_id)
-    eff = F.effective_shot(scene, fs)
+    eff = F.effective_shot(scene, fs, film)
     if fs["shot_row_id"]:
-        db.run("UPDATE shots SET az=?,el=?,dist=?,fov=?,fmt=?,action=?,outfit=? WHERE id=?",
-               (eff["az"], eff["el"], eff["dist"], eff["fov"], eff["fmt"], eff["action"], eff["outfit"], fs["shot_row_id"]))
+        db.run("UPDATE shots SET az=?,el=?,dist=?,fov=?,fmt=?,action=?,outfit=?,partner_id=?,interaction=?,outfit_b=? WHERE id=?",
+               (eff["az"], eff["el"], eff["dist"], eff["fov"], eff["fmt"], eff["action"], eff["outfit"],
+                eff.get("partner_id"), eff.get("interaction", ""), eff.get("outfit_b", ""), fs["shot_row_id"]))
         return db.one("SELECT * FROM shots WHERE id=?", (fs["shot_row_id"],))
     sid = pipeline.new_shot(c["id"], eff)
     db.run("UPDATE film_shots SET shot_row_id=? WHERE id=?", (sid, fs_id))
@@ -77,6 +78,11 @@ def shot_row(fs_id: int) -> dict:
 def request_image(fs_id: int, count: int = 1) -> dict:
     film, scene, fs, c = _ctx(fs_id)
     row = shot_row(fs_id)
+    if film.get("partner_id"):   # Duet: referencje [A_twarz, B_twarz], prompt wiazacy role; model edycji z max_refs >= 2
+        partner = db.one("SELECT * FROM characters WHERE id=?", (film["partner_id"],))
+        return pipeline.submit_image_duet(row, c, partner, film["edit_model"], count, None, row["interaction"] or "",
+                                          row["outfit"] or "", row["outfit_b"] or "", bool(film.get("allow_spark")),
+                                          None, fs_id, "image")
     return pipeline.submit_image(row, c, film["image_model"], film["edit_model"], True, count, fs_id, "image",
                                  allow_spark=bool(film.get("allow_spark")))
 

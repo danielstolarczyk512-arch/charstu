@@ -104,9 +104,67 @@ def refine_prompt(instruction: str) -> str:
             "background, lighting and the character's face and identity.")
 
 
-def video_prompt(c: dict, shot: dict) -> str:
-    """LTX: jeden plynny akapit w czasie terazniejszym."""
+# Opis zmiany ubrania w interakcji: wtedy klip nie wymusza niezmiennego stroju.
+_OUTFIT_CHANGE = re.compile(r"\b(undress\w*|strip\w*|take[sn]?\s+off|takes?\s+off|pull\w*\s+off|remov\w+|unbutton\w*|unzip\w*|"
+                            r"naked|nude|topless|clothes|clothing|lingerie)\b", re.IGNORECASE)
+
+
+def _roles(c: dict, partner: dict) -> tuple[str, str]:
+    """Krotkie, rozne etykiety A i B (imiona; przy braku lub rownych imionach opisowe)."""
+    a, b = _clean(c.get("name")), _clean(partner.get("name"))
+    if not a or not b or a.lower() == b.lower():
+        a, b = (a or "the first person") + (" (first reference)" if a else ""),                (b or "the second person") + (" (second reference)" if b else "")
+        if a == b:
+            a, b = "the first person", "the second person"
+    return a, b
+
+
+def _who(c: dict) -> str:
+    who = _clean(c.get("archetype"))
+    traits = _clean(c.get("traits"))
+    return f"{who} with {traits}" if who and traits else (who or traits)
+
+
+def duet_prompt(c: dict, partner: dict, shot: dict, n_refs: int = 2, pose_ref: bool = False, interaction: str = "",
+                outfit_a: str = "", outfit_b: str = "") -> str:
+    """Prompt edycji dla pary (Qwen/Krea edit): jawnie wiaze role. Kolejnosc referencji jak w sogni.py: 1. obraz = A (twarz),
+    2. = B (twarz), opcjonalnie 3. = tylko ulozenie cial. Partner nigdy nie jest 'the character'; bez zaimkow plci.
+    Puste stroje = jak w referencjach. Jedyne zdanie o liczbie osob: two_people() (B2)."""
     cam = describe(shot["az"], shot["el"], shot["dist"], shot["fov"])["en"]
+    a, b = _roles(c, partner)
+    action = _clean(shot.get("action"))
+    inter = _clean(interaction or shot.get("interaction"))
+    scene = f"Show {a} and {b} together, {cam}."
+    if inter:
+        scene += f" {inter[0].upper() + inter[1:]}."
+    if action:
+        scene += f" {action[0].upper() + action[1:]}."
+    wear = []
+    for name, ref, outfit in ((a, "first", outfit_a or shot.get("outfit")), (b, "second", outfit_b or shot.get("outfit_b"))):
+        out = wearing(_clean(outfit))
+        wear.append(f"{name} is {out}." if out else f"{name} keeps the outfit from the {ref} reference image.")
+    refs = [f"The first reference image shows {a}: use it only for {a}'s face and hairstyle"
+            + (f" ({_who(c)})." if _who(c) else "."),
+            f"The second reference image shows {b}: use it only for {b}'s face and hairstyle"
+            + (f" ({_who(partner)})." if _who(partner) else ".")]
+    if pose_ref and n_refs >= 3:
+        refs.append("The third reference image shows only the arrangement of the two bodies: copy only that body arrangement and "
+                    "ignore the faces, hair, skin and clothes of the people in it.")
+    return " ".join([scene, two_people(a, b), *wear, *refs])
+
+
+def video_prompt(c: dict, shot: dict, partner: dict | None = None, interaction: str = "") -> str:
+    """LTX: jeden plynny akapit w czasie terazniejszym. Z `partner`: liczba mnoga, obie osoby nazwane; niezmienny strój jest
+    wymuszany tylko, gdy interakcja nie opisuje zmiany ubrania."""
+    cam = describe(shot["az"], shot["el"], shot["dist"], shot["fov"])["en"]
+    if partner is not None:
+        a, b = _roles(c, partner)
+        inter = _clean(interaction or shot.get("interaction"))
+        action = _clean(shot.get("action"))
+        doing = " ".join(f"{t[0].upper() + t[1:]}." for t in (inter, action) if t) or f"{a} and {b} stand close together and breathe."
+        keep = "faces and hairstyles" if _OUTFIT_CHANGE.search(inter) else "faces, hairstyles and outfits"
+        return (f"A {cam} of {a} and {b}. {doing} The camera moves smoothly and steadily while both people keep their own "
+                f"{keep} throughout the entire clip. Both people stay clearly visible and distinct.")
     action = (shot.get("action") or "stands still and breathes").strip()
     return (
         f"A {cam} of {character_block(c, shot.get('outfit') or '')}. The character {action}. "
