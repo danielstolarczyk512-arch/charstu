@@ -1,5 +1,18 @@
 """Skladanie promptow z szablonow (kod, nie LLM)."""
+import re
+
 from .camera import describe
+
+# Zdanie o liczbie osob w kadrze. W Etapie 0 "Only one person..." naprawilo pojawianie sie drugiej osoby w zblizeniu,
+# wiec dla jednej postaci zostaje domyslne; dla pary wolajacy podaje two_people() zamiast niego (parametr `presence`).
+ONE_PERSON_FRAME = "Only one person is visible in the frame."
+ONE_PERSON_POSE = "Only one person is visible."
+
+
+def two_people(a: str, b: str) -> str:
+    """Zdanie o dwoch osobach w kadrze z jawnie nazwanymi rolami (a, b = krotkie opisy, np. imie)."""
+    return (f"Exactly two people are visible: {a} and {b}. "
+            "Keep both faces, both hairstyles and the scene unchanged.")
 
 
 def character_block(c: dict, outfit_override: str = "") -> str:
@@ -12,17 +25,33 @@ def _clean(s: str | None) -> str:
     return (s or "").strip().rstrip(".,; ")
 
 
+# Stroj opisujacy brak ubrania: "wearing fully nude" jest bledne, wiec "wearing" pomijamy.
+_UNCLOTHED = re.compile(r"^(?:(?:fully|completely|totally|entirely|almost|half|partially)[\s-]+)?(?:nude|naked|topless|bottomless|bare)\b",
+                        re.IGNORECASE)
+
+
+def wearing(cloth: str) -> str:
+    """Fraza stroju: 'wearing X', a dla opisow bez ubrania (nude/naked/topless/bare) sam opis."""
+    cloth = _clean(cloth)
+    if not cloth:
+        return ""
+    return cloth if _UNCLOTHED.match(cloth) else f"wearing {cloth}"
+
+
 def _described(c: dict, outfit: str) -> str:
     """Opis postaci zdaniem: 'archetyp with traits, wearing outfit'."""
     who = _clean(c.get("archetype")) or "a character"
     out = f"{who} with {_clean(c.get('traits'))}" if _clean(c.get("traits")) else who
-    cloth = _clean(outfit) or _clean(c.get("outfit"))
-    return f"{out}, wearing {cloth}" if cloth else out
+    cloth = wearing(_clean(outfit) or _clean(c.get("outfit")))
+    return f"{out}, {cloth}" if cloth else out
 
 
-def image_prompt(c: dict, shot: dict, with_refs: bool = False, style: str = "natural", n_refs: int = 1) -> str:
+def image_prompt(c: dict, shot: dict, with_refs: bool = False, style: str = "natural", n_refs: int = 1,
+                 presence: str | None = None) -> str:
     """Prompt obrazu w stylu oczekiwanym przez model (app/models.py):
-    delta (edycje), rich_caption (Krea), compact (Z-Image), natural (Chroma/FLUX), spatial (Qwen 2512)."""
+    delta (edycje), rich_caption (Krea), compact (Z-Image), natural (Chroma/FLUX), spatial (Qwen 2512).
+    presence: zdanie o liczbie osob w kadrze; None = jedna osoba (ONE_PERSON_FRAME), dla pary podaj two_people(...)."""
+    presence = presence or ONE_PERSON_FRAME
     cam = describe(shot["az"], shot["el"], shot["dist"], shot["fov"])["en"]
     action = _clean(shot.get("action")) or "standing in a neutral pose"
     outfit = (shot.get("outfit") or "").strip()
@@ -44,17 +73,18 @@ def image_prompt(c: dict, shot: dict, with_refs: bool = False, style: str = "nat
         role = (" Use the second reference image only for the character's face and outfit details." if n_refs >= 2 else "")
         if outfit:  # zmiana stroju: nie wymuszamy starego ubioru (wczesniej szablon sprzeczny z takim opisem)
             return (f"Show the same character from the reference image, {cam}. {action}. "
-                    f"Change her clothing: {outfit}. Only one person is visible in the frame. "
+                    f"Change her clothing: {outfit}. {presence} "
                     f"Keep her face, hairstyle and the overall scene and lighting exactly the same.{role}")
         return (f"Show the same character from the reference image, {cam}. {action}. "
-                "Only one person is visible in the frame. "
+                f"{presence} "
                 f"Keep her face, hairstyle, outfit and the overall scene and lighting exactly the same.{role}")
     return f"{character_block(c, outfit)}. {action}. Camera: {cam}."  # edycja bez referencji (awaryjnie)
 
 
-def pose_prompt(c: dict, shot: dict) -> str:
+def pose_prompt(c: dict, shot: dict, presence: str | None = None) -> str:
     """Poza z referencji (Qwen, sprawdzone testem): 1. obraz = postac z kanonu, 2. obraz = tylko poza ciala.
     Zdjecie pozy przecieka ubraniem/sylwetka, wiec prompt jawnie przypisuje twarz i strój do 1. obrazu."""
+    presence = presence or ONE_PERSON_POSE
     cam = describe(shot["az"], shot["el"], shot["dist"], shot["fov"])["en"]
     outfit = (shot.get("outfit") or "").strip()
     # Brzmienie zweryfikowane eksperymentem 3 (dluzsze/"zakazowe" wersje oddawaly obraz pozy prawie bez zmian).
@@ -64,7 +94,7 @@ def pose_prompt(c: dict, shot: dict) -> str:
     keep = f"her face, {who}" + (f", the {wear}" if wear else "") + " and the background"
     return ("The woman in the first image takes the same body pose as the person in the second image. "
             f"Keep {keep} from the first image. Do not use the second person's face, hair or clothes. "
-            "Only one person is visible.")
+            f"{presence}")
 
 
 def refine_prompt(instruction: str) -> str:
